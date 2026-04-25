@@ -12,6 +12,7 @@ type Claims struct {
 	UserID         int    `json:"user_id"`
 	OrganizationID int    `json:"organization_id"`
 	Email          string `json:"email"`
+	Role           string `json:"role"`
 	jwt.RegisteredClaims
 }
 
@@ -24,11 +25,12 @@ func CheckPassword(password, hash string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
-func GenerateToken(userID, orgID int, email, secret string) (string, error) {
+func GenerateToken(userID, orgID int, email, role, secret string) (string, error) {
 	claims := Claims{
 		UserID:         userID,
 		OrganizationID: orgID,
 		Email:          email,
+		Role:           role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * 24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

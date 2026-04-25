@@ -10,11 +10,19 @@ type Organization struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 
+const (
+	RoleOwner  = "owner"
+	RoleAdmin  = "admin"
+	RoleMember = "member"
+	RoleViewer = "viewer"
+)
+
 type User struct {
 	ID             int       `json:"id" db:"id"`
 	OrganizationID int       `json:"organization_id" db:"organization_id"`
 	Email          string    `json:"email" db:"email"`
 	PasswordHash   string    `json:"-" db:"password_hash"`
+	Role           string    `json:"role" db:"role"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 }
 
@@ -22,6 +30,11 @@ type RegisterRequest struct {
 	OrgName  string `json:"org_name" binding:"required"`
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=8"`
+}
+
+type InviteRequest struct {
+	Email string `json:"email" binding:"required,email"`
+	Role  string `json:"role" binding:"required,oneof=admin member viewer"`
 }
 
 type LoginRequest struct {

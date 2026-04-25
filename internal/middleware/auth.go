@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/theomorin/trivy-dashboard/internal/auth"
-	"github.com/theomorin/trivy-dashboard/internal/models"
 	"github.com/theomorin/trivy-dashboard/internal/repository"
 )
 
@@ -82,9 +81,18 @@ func ClaimsFromCtx(c *gin.Context) *auth.Claims {
 	return claims
 }
 
-// OrgFromAPIKey est utilisé pour valider qu'une clé API appartient bien à l'org
-func OrgSummary(c *gin.Context) *models.APIKey {
-	v, _ := c.Get("api_key")
-	k, _ := v.(*models.APIKey)
-	return k
+// RequireRole bloque si le rôle du user est insuffisant
+func RequireRole(roles ...string) gin.HandlerFunc {
+	allowed := make(map[string]bool)
+	for _, r := range roles {
+		allowed[r] = true
+	}
+	return func(c *gin.Context) {
+		claims := ClaimsFromCtx(c)
+		if claims == nil || !allowed[claims.Role] {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+			return
+		}
+		c.Next()
+	}
 }

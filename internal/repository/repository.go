@@ -28,23 +28,57 @@ func (r *Repository) CreateOrganization(ctx context.Context, name string) (*mode
 	return org, err
 }
 
-func (r *Repository) CreateUser(ctx context.Context, orgID int, email, passwordHash string) (*models.User, error) {
+func (r *Repository) CreateUser(ctx context.Context, orgID int, email, passwordHash, role string) (*models.User, error) {
 	u := &models.User{}
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO users (organization_id, email, password_hash)
-		VALUES ($1, $2, $3)
-		RETURNING id, organization_id, email, created_at
-	`, orgID, email, passwordHash).Scan(&u.ID, &u.OrganizationID, &u.Email, &u.CreatedAt)
+		INSERT INTO users (organization_id, email, password_hash, role)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, organization_id, email, role, created_at
+	`, orgID, email, passwordHash, role).Scan(&u.ID, &u.OrganizationID, &u.Email, &u.Role, &u.CreatedAt)
 	return u, err
 }
 
 func (r *Repository) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	u := &models.User{}
 	err := r.db.QueryRow(ctx, `
-		SELECT id, organization_id, email, password_hash, created_at
+		SELECT id, organization_id, email, password_hash, role, created_at
 		FROM users WHERE email = $1
-	`, email).Scan(&u.ID, &u.OrganizationID, &u.Email, &u.PasswordHash, &u.CreatedAt)
+	`, email).Scan(&u.ID, &u.OrganizationID, &u.Email, &u.PasswordHash, &u.Role, &u.CreatedAt)
 	return u, err
+}
+
+func (r *Repository) ListMembers(ctx context.Context, orgID int) ([]models.User, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, organization_id, email, role, created_at
+		FROM users WHERE organization_id = $1 ORDER BY created_at
+	`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []models.User
+	for rows.Next() {
+		var u models.User
+		if err := rows.Scan(&u.ID, &u.OrganizationID, &u.Email, &u.Role, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+func (r *Repository) UpdateUserRole(ctx context.Context, orgID, userID int, role string) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE users SET role = $1 WHERE id = $2 AND organization_id = $3
+	`, role, userID, orgID)
+	return err
+}
+
+func (r *Repository) RemoveMember(ctx context.Context, orgID, userID int) error {
+	_, err := r.db.Exec(ctx, `
+		DELETE FROM users WHERE id = $1 AND organization_id = $2 AND role != 'owner'
+	`, userID, orgID)
+	return err
 }
 
 // ── API Keys ──────────────────────────────────────────────────────────────────

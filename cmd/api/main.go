@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/theomorin/trivy-dashboard/internal/handlers"
 	"github.com/theomorin/trivy-dashboard/internal/middleware"
+	"github.com/theomorin/trivy-dashboard/internal/models"
 	"github.com/theomorin/trivy-dashboard/internal/repository"
 )
 
@@ -52,13 +53,24 @@ func main() {
 
 		protected := api.Group("/", middleware.Auth(jwtSecret, repo))
 		{
-			protected.POST("/report", h.IngestReport)
+			// viewer+ : lecture seule
 			protected.GET("/projects", h.ListProjects)
 			protected.GET("/projects/:name/diff", h.GetDiff)
 			protected.GET("/vulnerabilities", h.ListVulnerabilities)
-			protected.POST("/api-keys", h.CreateAPIKey)
-			protected.GET("/api-keys", h.ListAPIKeys)
-			protected.DELETE("/api-keys/:id", h.RevokeAPIKey)
+			protected.GET("/members", h.ListMembers)
+
+			// member+ : push de rapports
+			protected.POST("/report", middleware.RequireRole(models.RoleOwner, models.RoleAdmin, models.RoleMember), h.IngestReport)
+
+			// admin+ : gestion des clés API
+			protected.POST("/api-keys", middleware.RequireRole(models.RoleOwner, models.RoleAdmin), h.CreateAPIKey)
+			protected.GET("/api-keys", middleware.RequireRole(models.RoleOwner, models.RoleAdmin), h.ListAPIKeys)
+			protected.DELETE("/api-keys/:id", middleware.RequireRole(models.RoleOwner, models.RoleAdmin), h.RevokeAPIKey)
+
+			// owner+ : gestion des membres
+			protected.POST("/members/invite", middleware.RequireRole(models.RoleOwner, models.RoleAdmin), h.InviteMember)
+			protected.PUT("/members/:id/role", middleware.RequireRole(models.RoleOwner), h.UpdateMemberRole)
+			protected.DELETE("/members/:id", middleware.RequireRole(models.RoleOwner), h.RemoveMember)
 		}
 	}
 

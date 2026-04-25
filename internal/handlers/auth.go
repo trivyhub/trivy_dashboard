@@ -30,13 +30,13 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	user, err := h.repo.CreateUser(ctx, org.ID, req.Email, hash)
+	user, err := h.repo.CreateUser(ctx, org.ID, req.Email, hash, models.RoleOwner)
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "email already in use"})
 		return
 	}
 
-	token, err := auth.GenerateToken(user.ID, org.ID, user.Email, h.jwtSecret)
+	token, err := auth.GenerateToken(user.ID, org.ID, user.Email, user.Role, h.jwtSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
@@ -61,7 +61,7 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	token, err := auth.GenerateToken(user.ID, user.OrganizationID, user.Email, h.jwtSecret)
+	token, err := auth.GenerateToken(user.ID, user.OrganizationID, user.Email, user.Role, h.jwtSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
