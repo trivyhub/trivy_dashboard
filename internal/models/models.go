@@ -85,6 +85,8 @@ type IngestRequest struct {
 	ProjectName string      `json:"project_name" binding:"required"`
 	Environment string      `json:"environment"`
 	Owner       string      `json:"owner"`
+	PipelineID  string      `json:"pipeline_id"`
+	PipelineURL string      `json:"pipeline_url"`
 	Report      TrivyReport `json:"report" binding:"required"`
 }
 
@@ -100,11 +102,22 @@ type Project struct {
 }
 
 type Scan struct {
-	ID          int       `json:"id" db:"id"`
-	ProjectID   int       `json:"project_id" db:"project_id"`
-	ImageName   string    `json:"image_name" db:"image_name"`
-	ImageDigest string    `json:"image_digest" db:"image_digest"`
-	ScannedAt   time.Time `json:"scanned_at" db:"scanned_at"`
+	ID          int        `json:"id" db:"id"`
+	ProjectID   int        `json:"project_id" db:"project_id"`
+	ImageName   string     `json:"image_name" db:"image_name"`
+	ImageDigest string     `json:"image_digest" db:"image_digest"`
+	ScannedAt   time.Time  `json:"scanned_at" db:"scanned_at"`
+	PipelineID  *string    `json:"pipeline_id" db:"pipeline_id"`
+	PipelineURL *string    `json:"pipeline_url" db:"pipeline_url"`
+}
+
+type ScanSummary struct {
+	Scan
+	Critical int `json:"critical" db:"critical"`
+	High     int `json:"high" db:"high"`
+	Medium   int `json:"medium" db:"medium"`
+	Low      int `json:"low" db:"low"`
+	Total    int `json:"total" db:"total"`
 }
 
 type DBVulnerability struct {

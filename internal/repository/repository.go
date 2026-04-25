@@ -217,19 +217,64 @@ func (r *Repository) ListProjects(ctx context.Context, orgID int) ([]models.Proj
 
 // ── Scans ─────────────────────────────────────────────────────────────────────
 
-func (r *Repository) CreateScan(ctx context.Context, projectID int, imageName, digest string, raw json.RawMessage) (*models.Scan, error) {
+func (r *Repository) CreateScan(ctx context.Context, projectID int, imageName, digest, pipelineID, pipelineURL string, raw json.RawMessage) (*models.Scan, error) {
 	s := &models.Scan{}
+	var pid, purl *string
+	if pipelineID != "" {
+		pid = &pipelineID
+	}
+	if pipelineURL != "" {
+		purl = &pipelineURL
+	}
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO scans (project_id, image_name, image_digest, raw_json)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, project_id, image_name, image_digest, scanned_at
-	`, projectID, imageName, digest, raw).Scan(&s.ID, &s.ProjectID, &s.ImageName, &s.ImageDigest, &s.ScannedAt)
+		INSERT INTO scans (project_id, image_name, image_digest, pipeline_id, pipeline_url, raw_json)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, project_id, image_name, image_digest, scanned_at, pipeline_id, pipeline_url
+	`, projectID, imageName, digest, pid, purl, raw).Scan(
+		&s.ID, &s.ProjectID, &s.ImageName, &s.ImageDigest, &s.ScannedAt, &s.PipelineID, &s.PipelineURL,
+	)
 	return s, err
+}
+
+func (r *Repository) ListScans(ctx context.Context, projectID int) ([]models.ScanSummary, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			s.id, s.project_id, s.image_name, s.image_digest, s.scanned_at,
+			s.pipeline_id, s.pipeline_url,
+			COUNT(CASE WHEN v.severity = 'CRITICAL' THEN 1 END) AS critical,
+			COUNT(CASE WHEN v.severity = 'HIGH'     THEN 1 END) AS high,
+			COUNT(CASE WHEN v.severity = 'MEDIUM'   THEN 1 END) AS medium,
+			COUNT(CASE WHEN v.severity = 'LOW'      THEN 1 END) AS low,
+			COUNT(v.id) AS total
+		FROM scans s
+		LEFT JOIN vulnerabilities v ON v.scan_id = s.id
+		WHERE s.project_id = $1
+		GROUP BY s.id
+		ORDER BY s.scanned_at DESC
+	`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var scans []models.ScanSummary
+	for rows.Next() {
+		var ss models.ScanSummary
+		if err := rows.Scan(
+			&ss.ID, &ss.ProjectID, &ss.ImageName, &ss.ImageDigest, &ss.ScannedAt,
+			&ss.PipelineID, &ss.PipelineURL,
+			&ss.Critical, &ss.High, &ss.Medium, &ss.Low, &ss.Total,
+		); err != nil {
+			return nil, err
+		}
+		scans = append(scans, ss)
+	}
+	return scans, rows.Err()
 }
 
 func (r *Repository) GetLastTwoScans(ctx context.Context, projectID int) ([]models.Scan, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, project_id, image_name, image_digest, scanned_at
+		SELECT id, project_id, image_name, image_digest, scanned_at, pipeline_id, pipeline_url
 		FROM scans WHERE project_id = $1
 		ORDER BY scanned_at DESC LIMIT 2
 	`, projectID)
@@ -241,7 +286,7 @@ func (r *Repository) GetLastTwoScans(ctx context.Context, projectID int) ([]mode
 	var scans []models.Scan
 	for rows.Next() {
 		var s models.Scan
-		if err := rows.Scan(&s.ID, &s.ProjectID, &s.ImageName, &s.ImageDigest, &s.ScannedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.ProjectID, &s.ImageName, &s.ImageDigest, &s.ScannedAt, &s.PipelineID, &s.PipelineURL); err != nil {
 			return nil, err
 		}
 		scans = append(scans, s)
