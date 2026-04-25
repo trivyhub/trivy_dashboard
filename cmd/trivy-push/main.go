@@ -24,8 +24,6 @@ type PushPayload struct {
 	Report      json.RawMessage `json:"report"`
 }
 
-var cfgFile string
-
 func configPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".trivy-push.json")
@@ -41,29 +39,47 @@ func loadConfig() (Config, error) {
 	return cfg, err
 }
 
+func doRequest(method, url, auth string, body []byte) (*http.Response, []byte, error) {
+	req, err := http.NewRequest(method, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", auth)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("erreur réseau: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	return resp, respBody, nil
+}
+
 func main() {
 	root := &cobra.Command{
 		Use:   "trivy-push",
-		Short: "Envoie un rapport Trivy au dashboard",
+		Short: "CLI pour envoyer des rapports Trivy vers le dashboard",
 	}
 
 	// ── config ────────────────────────────────────────────────────────────────
 	var cfgURL, cfgKey string
 	cmdConfig := &cobra.Command{
 		Use:   "config",
-		Short: "Configurer l'URL et l'API key du dashboard",
+		Short: "Configurer l'URL et la clé API",
+		Example: `  trivy-push config --url https://mon-dashboard.com --key tvd_abc123`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := Config{URL: cfgURL, APIKey: cfgKey}
 			data, _ := json.MarshalIndent(cfg, "", "  ")
 			if err := os.WriteFile(configPath(), data, 0600); err != nil {
 				return err
 			}
-			fmt.Printf("Config sauvegardée dans %s\n", configPath())
+			fmt.Printf("✓ Config sauvegardée dans %s\n", configPath())
 			return nil
 		},
 	}
-	cmdConfig.Flags().StringVar(&cfgURL, "url", "", "URL du dashboard (ex: http://localhost:8080)")
-	cmdConfig.Flags().StringVar(&cfgKey, "key", "", "API key")
+	cmdConfig.Flags().StringVar(&cfgURL, "url", "", "URL du dashboard (ex: https://mon-dashboard.com)")
+	cmdConfig.Flags().StringVar(&cfgKey, "key", "", "Clé API générée depuis le dashboard")
 	cmdConfig.MarkFlagRequired("url")
 	cmdConfig.MarkFlagRequired("key")
 
@@ -71,8 +87,8 @@ func main() {
 	var project, env, owner, file string
 	cmdPush := &cobra.Command{
 		Use:   "push",
-		Short: "Envoyer un rapport (stdin ou fichier)",
-		Example: `  trivy image --format json mon-image | trivy-push push --project mon-app
+		Short: "Envoyer un rapport Trivy",
+		Example: `  trivy image --format json mon-image:latest | trivy-push push --project mon-app
   trivy-push push --project mon-app --file report.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
@@ -105,17 +121,10 @@ func main() {
 			}
 			body, _ := json.Marshal(payload)
 
-			req, _ := http.NewRequest("POST", cfg.URL+"/api/v1/report", bytes.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-API-Key", cfg.APIKey)
-
-			resp, err := http.DefaultClient.Do(req)
+			resp, respBody, err := doRequest("POST", cfg.URL+"/api/v1/report", "ApiKey "+cfg.APIKey, body)
 			if err != nil {
-				return fmt.Errorf("erreur réseau: %w", err)
+				return err
 			}
-			defer resp.Body.Close()
-
-			respBody, _ := io.ReadAll(resp.Body)
 			if resp.StatusCode != http.StatusCreated {
 				return fmt.Errorf("erreur %d: %s", resp.StatusCode, string(respBody))
 			}
@@ -128,7 +137,7 @@ func main() {
 		},
 	}
 	cmdPush.Flags().StringVarP(&project, "project", "p", "", "Nom du projet (obligatoire)")
-	cmdPush.Flags().StringVarP(&env, "env", "e", "production", "Environnement (production/staging/development)")
+	cmdPush.Flags().StringVarP(&env, "env", "e", "production", "Environnement")
 	cmdPush.Flags().StringVarP(&owner, "owner", "o", "", "Équipe propriétaire")
 	cmdPush.Flags().StringVarP(&file, "file", "f", "", "Fichier JSON Trivy (sinon stdin)")
 	cmdPush.MarkFlagRequired("project")

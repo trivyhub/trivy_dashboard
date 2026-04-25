@@ -1,22 +1,90 @@
 package middleware
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/theomorin/trivy-dashboard/internal/auth"
+	"github.com/theomorin/trivy-dashboard/internal/models"
+	"github.com/theomorin/trivy-dashboard/internal/repository"
 )
 
-func APIKeyAuth(apiKey string) gin.HandlerFunc {
+const ClaimsKey = "claims"
+
+func JWTAuth(secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		key := c.GetHeader("X-API-Key")
-		if key == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing X-API-Key header"})
+		header := c.GetHeader("Authorization")
+		if header == "" || !strings.HasPrefix(header, "Bearer ") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing Authorization header"})
 			return
 		}
-		if key != apiKey {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid API key"})
+		claims, err := auth.ParseToken(strings.TrimPrefix(header, "Bearer "), secret)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
+		c.Set(ClaimsKey, claims)
 		c.Next()
 	}
+}
+
+// Auth accepte soit un JWT (site web) soit une API key (pipeline)
+func Auth(secret string, repo *repository.Repository) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+
+		// JWT
+		if strings.HasPrefix(header, "Bearer ") {
+			claims, err := auth.ParseToken(strings.TrimPrefix(header, "Bearer "), secret)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+				return
+			}
+			c.Set(ClaimsKey, claims)
+			c.Next()
+			return
+		}
+
+		// API Key
+		if strings.HasPrefix(header, "ApiKey ") {
+			rawKey := strings.TrimPrefix(header, "ApiKey ")
+			sum := sha256.Sum256([]byte(rawKey))
+			hash := hex.EncodeToString(sum[:])
+
+			apiKey, err := repo.GetAPIKeyByHash(context.Background(), hash)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid api key"})
+				return
+			}
+
+			go repo.TouchAPIKey(context.Background(), apiKey.ID)
+
+			c.Set(ClaimsKey, &auth.Claims{
+				UserID:         0,
+				OrganizationID: apiKey.OrganizationID,
+				Email:          "",
+			})
+			c.Next()
+			return
+		}
+
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing authorization"})
+	}
+}
+
+func ClaimsFromCtx(c *gin.Context) *auth.Claims {
+	v, _ := c.Get(ClaimsKey)
+	claims, _ := v.(*auth.Claims)
+	return claims
+}
+
+// OrgFromAPIKey est utilisé pour valider qu'une clé API appartient bien à l'org
+func OrgSummary(c *gin.Context) *models.APIKey {
+	v, _ := c.Get("api_key")
+	k, _ := v.(*models.APIKey)
+	return k
 }

@@ -17,24 +17,167 @@ func New(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
-// UpsertProject crée ou retourne un projet existant
-func (r *Repository) UpsertProject(ctx context.Context, name, owner, env string) (*models.Project, error) {
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+func (r *Repository) CreateOrganization(ctx context.Context, name string) (*models.Organization, error) {
+	org := &models.Organization{}
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO organizations (name) VALUES ($1)
+		RETURNING id, name, created_at
+	`, name).Scan(&org.ID, &org.Name, &org.CreatedAt)
+	return org, err
+}
+
+func (r *Repository) CreateUser(ctx context.Context, orgID int, email, passwordHash string) (*models.User, error) {
+	u := &models.User{}
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO users (organization_id, email, password_hash)
+		VALUES ($1, $2, $3)
+		RETURNING id, organization_id, email, created_at
+	`, orgID, email, passwordHash).Scan(&u.ID, &u.OrganizationID, &u.Email, &u.CreatedAt)
+	return u, err
+}
+
+func (r *Repository) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
+	u := &models.User{}
+	err := r.db.QueryRow(ctx, `
+		SELECT id, organization_id, email, password_hash, created_at
+		FROM users WHERE email = $1
+	`, email).Scan(&u.ID, &u.OrganizationID, &u.Email, &u.PasswordHash, &u.CreatedAt)
+	return u, err
+}
+
+// ── API Keys ──────────────────────────────────────────────────────────────────
+
+func (r *Repository) CreateAPIKey(ctx context.Context, orgID int, name, keyHash, keyPrefix string) (*models.APIKey, error) {
+	k := &models.APIKey{}
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO api_keys (organization_id, name, key_hash, key_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, organization_id, name, key_prefix, created_at, last_used_at, revoked
+	`, orgID, name, keyHash, keyPrefix).Scan(
+		&k.ID, &k.OrganizationID, &k.Name, &k.KeyPrefix,
+		&k.CreatedAt, &k.LastUsedAt, &k.Revoked,
+	)
+	return k, err
+}
+
+func (r *Repository) GetAPIKeyByHash(ctx context.Context, keyHash string) (*models.APIKey, error) {
+	k := &models.APIKey{}
+	err := r.db.QueryRow(ctx, `
+		SELECT id, organization_id, name, key_prefix, created_at, last_used_at, revoked
+		FROM api_keys WHERE key_hash = $1 AND revoked = false
+	`, keyHash).Scan(
+		&k.ID, &k.OrganizationID, &k.Name, &k.KeyPrefix,
+		&k.CreatedAt, &k.LastUsedAt, &k.Revoked,
+	)
+	return k, err
+}
+
+func (r *Repository) ListAPIKeys(ctx context.Context, orgID int) ([]models.APIKey, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, organization_id, name, key_prefix, created_at, last_used_at, revoked
+		FROM api_keys WHERE organization_id = $1
+		ORDER BY created_at DESC
+	`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var keys []models.APIKey
+	for rows.Next() {
+		var k models.APIKey
+		if err := rows.Scan(&k.ID, &k.OrganizationID, &k.Name, &k.KeyPrefix,
+			&k.CreatedAt, &k.LastUsedAt, &k.Revoked); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
+}
+
+func (r *Repository) RevokeAPIKey(ctx context.Context, orgID, keyID int) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE api_keys SET revoked = true
+		WHERE id = $1 AND organization_id = $2
+	`, keyID, orgID)
+	return err
+}
+
+func (r *Repository) TouchAPIKey(ctx context.Context, keyID int) {
+	r.db.Exec(ctx, `UPDATE api_keys SET last_used_at = NOW() WHERE id = $1`, keyID)
+}
+
+// ── Projects ──────────────────────────────────────────────────────────────────
+
+func (r *Repository) UpsertProject(ctx context.Context, orgID int, name, owner, env string) (*models.Project, error) {
 	if env == "" {
-		env = "development"
+		env = "production"
 	}
 	p := &models.Project{}
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO projects (name, owner, environment)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (name) DO UPDATE
+		INSERT INTO projects (organization_id, name, owner, environment)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (organization_id, name) DO UPDATE
 			SET owner = EXCLUDED.owner,
 			    environment = EXCLUDED.environment
-		RETURNING id, name, owner, environment, created_at
-	`, name, owner, env).Scan(&p.ID, &p.Name, &p.Owner, &p.Environment, &p.CreatedAt)
+		RETURNING id, organization_id, name, owner, environment, created_at
+	`, orgID, name, owner, env).Scan(&p.ID, &p.OrganizationID, &p.Name, &p.Owner, &p.Environment, &p.CreatedAt)
 	return p, err
 }
 
-// CreateScan insère un nouveau scan
+func (r *Repository) GetProjectByName(ctx context.Context, orgID int, name string) (*models.Project, error) {
+	p := &models.Project{}
+	err := r.db.QueryRow(ctx, `
+		SELECT id, organization_id, name, owner, environment, created_at
+		FROM projects WHERE organization_id = $1 AND name = $2
+	`, orgID, name).Scan(&p.ID, &p.OrganizationID, &p.Name, &p.Owner, &p.Environment, &p.CreatedAt)
+	return p, err
+}
+
+func (r *Repository) ListProjects(ctx context.Context, orgID int) ([]models.ProjectSummary, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			p.id, p.organization_id, p.name, p.owner, p.environment, p.created_at,
+			MAX(s.scanned_at) AS last_scan,
+			COUNT(DISTINCT s.id) AS total_scans,
+			COUNT(CASE WHEN v.severity = 'CRITICAL' THEN 1 END) AS critical,
+			COUNT(CASE WHEN v.severity = 'HIGH'     THEN 1 END) AS high,
+			COUNT(CASE WHEN v.severity = 'MEDIUM'   THEN 1 END) AS medium,
+			COUNT(CASE WHEN v.severity = 'LOW'      THEN 1 END) AS low
+		FROM projects p
+		LEFT JOIN scans s ON s.project_id = p.id
+		LEFT JOIN vulnerabilities v ON v.scan_id = (
+			SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1
+		)
+		WHERE p.organization_id = $1
+		GROUP BY p.id
+		ORDER BY p.name
+	`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summaries []models.ProjectSummary
+	for rows.Next() {
+		var ps models.ProjectSummary
+		err := rows.Scan(
+			&ps.ID, &ps.OrganizationID, &ps.Name, &ps.Owner, &ps.Environment, &ps.CreatedAt,
+			&ps.LastScan, &ps.TotalScans,
+			&ps.Critical, &ps.High, &ps.Medium, &ps.Low,
+		)
+		if err != nil {
+			return nil, err
+		}
+		summaries = append(summaries, ps)
+	}
+	return summaries, rows.Err()
+}
+
+// ── Scans ─────────────────────────────────────────────────────────────────────
+
 func (r *Repository) CreateScan(ctx context.Context, projectID int, imageName, digest string, raw json.RawMessage) (*models.Scan, error) {
 	s := &models.Scan{}
 	err := r.db.QueryRow(ctx, `
@@ -45,7 +188,30 @@ func (r *Repository) CreateScan(ctx context.Context, projectID int, imageName, d
 	return s, err
 }
 
-// BulkInsertVulnerabilities insère toutes les CVE d'un scan
+func (r *Repository) GetLastTwoScans(ctx context.Context, projectID int) ([]models.Scan, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, project_id, image_name, image_digest, scanned_at
+		FROM scans WHERE project_id = $1
+		ORDER BY scanned_at DESC LIMIT 2
+	`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var scans []models.Scan
+	for rows.Next() {
+		var s models.Scan
+		if err := rows.Scan(&s.ID, &s.ProjectID, &s.ImageName, &s.ImageDigest, &s.ScannedAt); err != nil {
+			return nil, err
+		}
+		scans = append(scans, s)
+	}
+	return scans, rows.Err()
+}
+
+// ── Vulnerabilities ───────────────────────────────────────────────────────────
+
 func (r *Repository) BulkInsertVulnerabilities(ctx context.Context, scanID int, vulns []models.DBVulnerability) error {
 	if len(vulns) == 0 {
 		return nil
@@ -69,94 +235,45 @@ func (r *Repository) BulkInsertVulnerabilities(ctx context.Context, scanID int, 
 	return tx.Commit(ctx)
 }
 
-// ListProjects retourne le résumé de tous les projets
-func (r *Repository) ListProjects(ctx context.Context) ([]models.ProjectSummary, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT
-			p.id, p.name, p.owner, p.environment, p.created_at,
-			MAX(s.scanned_at) AS last_scan,
-			COUNT(DISTINCT s.id) AS total_scans,
-			COUNT(CASE WHEN v.severity = 'CRITICAL' THEN 1 END) AS critical,
-			COUNT(CASE WHEN v.severity = 'HIGH'     THEN 1 END) AS high,
-			COUNT(CASE WHEN v.severity = 'MEDIUM'   THEN 1 END) AS medium,
-			COUNT(CASE WHEN v.severity = 'LOW'      THEN 1 END) AS low,
-			COUNT(CASE WHEN v.severity = 'UNKNOWN'  THEN 1 END) AS unknown
-		FROM projects p
-		LEFT JOIN scans s ON s.project_id = p.id
-		LEFT JOIN vulnerabilities v ON v.scan_id = (
-			SELECT id FROM scans
-			WHERE project_id = p.id
-			ORDER BY scanned_at DESC
-			LIMIT 1
-		)
-		GROUP BY p.id
-		ORDER BY p.name
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var summaries []models.ProjectSummary
-	for rows.Next() {
-		var ps models.ProjectSummary
-		err := rows.Scan(
-			&ps.ID, &ps.Name, &ps.Owner, &ps.Environment, &ps.CreatedAt,
-			&ps.LastScan, &ps.TotalScans,
-			&ps.SeveritySummary.Critical, &ps.SeveritySummary.High,
-			&ps.SeveritySummary.Medium, &ps.SeveritySummary.Low, &ps.SeveritySummary.Unknown,
-		)
-		if err != nil {
-			return nil, err
-		}
-		summaries = append(summaries, ps)
-	}
-	return summaries, rows.Err()
-}
-
-// GetProjectByName retourne un projet par son nom
-func (r *Repository) GetProjectByName(ctx context.Context, name string) (*models.Project, error) {
-	p := &models.Project{}
-	err := r.db.QueryRow(ctx, `
-		SELECT id, name, owner, environment, created_at
-		FROM projects WHERE name = $1
-	`, name).Scan(&p.ID, &p.Name, &p.Owner, &p.Environment, &p.CreatedAt)
-	return p, err
-}
-
-// GetLastTwoScans retourne les deux derniers scans d'un projet
-func (r *Repository) GetLastTwoScans(ctx context.Context, projectID int) ([]models.Scan, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT id, project_id, image_name, image_digest, scanned_at
-		FROM scans
-		WHERE project_id = $1
-		ORDER BY scanned_at DESC
-		LIMIT 2
-	`, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var scans []models.Scan
-	for rows.Next() {
-		var s models.Scan
-		if err := rows.Scan(&s.ID, &s.ProjectID, &s.ImageName, &s.ImageDigest, &s.ScannedAt); err != nil {
-			return nil, err
-		}
-		scans = append(scans, s)
-	}
-	return scans, rows.Err()
-}
-
-// GetVulnerabilitiesByScan retourne toutes les CVE d'un scan
 func (r *Repository) GetVulnerabilitiesByScan(ctx context.Context, scanID int) ([]models.DBVulnerability, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, scan_id, cve_id, severity, package_name,
 		       installed_version, fixed_version, title, is_fixed, first_seen_at
-		FROM vulnerabilities
-		WHERE scan_id = $1
+		FROM vulnerabilities WHERE scan_id = $1
 	`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var vulns []models.DBVulnerability
+	for rows.Next() {
+		var v models.DBVulnerability
+		if err := rows.Scan(
+			&v.ID, &v.ScanID, &v.CVEID, &v.Severity, &v.PackageName,
+			&v.InstalledVersion, &v.FixedVersion, &v.Title, &v.IsFixed, &v.FirstSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		vulns = append(vulns, v)
+	}
+	return vulns, rows.Err()
+}
+
+func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID int) ([]models.DBVulnerability, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT v.id, v.scan_id, v.cve_id, v.severity, v.package_name,
+		       v.installed_version, v.fixed_version, v.title, v.is_fixed, v.first_seen_at
+		FROM vulnerabilities v
+		JOIN scans s ON s.id = v.scan_id
+		JOIN projects p ON p.id = s.project_id
+		WHERE p.organization_id = $1
+		  AND s.id = (SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1)
+		ORDER BY CASE v.severity
+			WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2
+			WHEN 'MEDIUM'   THEN 3 WHEN 'LOW'  THEN 4 ELSE 5
+		END, p.name, v.cve_id
+	`, orgID)
 	if err != nil {
 		return nil, err
 	}

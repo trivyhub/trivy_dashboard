@@ -5,20 +5,29 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/theomorin/trivy-dashboard/internal/auth"
+	"github.com/theomorin/trivy-dashboard/internal/middleware"
 	"github.com/theomorin/trivy-dashboard/internal/models"
 	"github.com/theomorin/trivy-dashboard/internal/repository"
 )
 
 type Handler struct {
-	repo *repository.Repository
+	repo      *repository.Repository
+	jwtSecret string
 }
 
-func New(repo *repository.Repository) *Handler {
-	return &Handler{repo: repo}
+func New(repo *repository.Repository, jwtSecret string) *Handler {
+	return &Handler{repo: repo, jwtSecret: jwtSecret}
+}
+
+func claimsFromCtx(c *gin.Context) *auth.Claims {
+	return middleware.ClaimsFromCtx(c)
 }
 
 // POST /api/v1/report
 func (h *Handler) IngestReport(c *gin.Context) {
+	claims := claimsFromCtx(c)
+
 	var req models.IngestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -27,13 +36,12 @@ func (h *Handler) IngestReport(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	project, err := h.repo.UpsertProject(ctx, req.ProjectName, req.Owner, req.Environment)
+	project, err := h.repo.UpsertProject(ctx, claims.OrganizationID, req.ProjectName, req.Owner, req.Environment)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upsert project"})
 		return
 	}
 
-	// Extraire le digest depuis les metadata
 	digest := ""
 	if req.Report.Metadata != nil && len(req.Report.Metadata.RepoDigests) > 0 {
 		digest = req.Report.Metadata.RepoDigests[0]
@@ -46,7 +54,6 @@ func (h *Handler) IngestReport(c *gin.Context) {
 		return
 	}
 
-	// Aplatir toutes les vulnérabilités des résultats
 	var vulns []models.DBVulnerability
 	for _, result := range req.Report.Results {
 		for _, v := range result.Vulnerabilities {
@@ -77,7 +84,8 @@ func (h *Handler) IngestReport(c *gin.Context) {
 
 // GET /api/v1/projects
 func (h *Handler) ListProjects(c *gin.Context) {
-	summaries, err := h.repo.ListProjects(c.Request.Context())
+	claims := claimsFromCtx(c)
+	summaries, err := h.repo.ListProjects(c.Request.Context(), claims.OrganizationID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list projects"})
 		return
@@ -87,10 +95,10 @@ func (h *Handler) ListProjects(c *gin.Context) {
 
 // GET /api/v1/projects/:name/diff
 func (h *Handler) GetDiff(c *gin.Context) {
-	name := c.Param("name")
+	claims := claimsFromCtx(c)
 	ctx := c.Request.Context()
 
-	project, err := h.repo.GetProjectByName(ctx, name)
+	project, err := h.repo.GetProjectByName(ctx, claims.OrganizationID, c.Param("name"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
 		return
@@ -102,16 +110,8 @@ func (h *Handler) GetDiff(c *gin.Context) {
 		return
 	}
 
-	current, err := h.repo.GetVulnerabilitiesByScan(ctx, scans[0].ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get current scan"})
-		return
-	}
-	previous, err := h.repo.GetVulnerabilitiesByScan(ctx, scans[1].ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get previous scan"})
-		return
-	}
+	current, _ := h.repo.GetVulnerabilitiesByScan(ctx, scans[0].ID)
+	previous, _ := h.repo.GetVulnerabilitiesByScan(ctx, scans[1].ID)
 
 	currentSet := make(map[string]bool)
 	for _, v := range current {
@@ -142,23 +142,15 @@ func (h *Handler) GetDiff(c *gin.Context) {
 	})
 }
 
-// GET /api/v1/projects/:name/scans
-func (h *Handler) GetScans(c *gin.Context) {
-	name := c.Param("name")
-	ctx := c.Request.Context()
-
-	project, err := h.repo.GetProjectByName(ctx, name)
+// GET /api/v1/vulnerabilities
+func (h *Handler) ListVulnerabilities(c *gin.Context) {
+	claims := claimsFromCtx(c)
+	vulns, err := h.repo.GetLatestVulnerabilitiesByOrg(c.Request.Context(), claims.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list vulnerabilities"})
 		return
 	}
-
-	scans, err := h.repo.GetLastTwoScans(ctx, project.ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get scans"})
-		return
-	}
-	c.JSON(http.StatusOK, scans)
+	c.JSON(http.StatusOK, vulns)
 }
 
 // GET /healthz

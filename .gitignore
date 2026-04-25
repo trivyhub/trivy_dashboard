@@ -2,3 +2,4 @@
 *.json.bak
 trivy-report.json
 /bin/
+releases/
