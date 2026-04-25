@@ -50,6 +50,8 @@ func main() {
 	{
 		api.POST("/auth/register", h.Register)
 		api.POST("/auth/login", h.Login)
+		api.GET("/auth/me", middleware.Auth(jwtSecret, repo), h.Me)
+		api.PUT("/auth/password", middleware.Auth(jwtSecret, repo), h.ChangePassword)
 
 		protected := api.Group("/", middleware.Auth(jwtSecret, repo))
 		{

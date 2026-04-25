@@ -67,6 +67,11 @@ func (r *Repository) ListMembers(ctx context.Context, orgID int) ([]models.User,
 	return users, rows.Err()
 }
 
+func (r *Repository) UpdatePassword(ctx context.Context, userID int, hash string) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2`, hash, userID)
+	return err
+}
+
 func (r *Repository) UpdateUserRole(ctx context.Context, orgID, userID int, role string) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE users SET role = $1 WHERE id = $2 AND organization_id = $3
