@@ -1,0 +1,84 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+
+
+  push:
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/test67
+          tags: |
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Push image
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          format: json
+          output: trivy-report.json
+
+      - name: Upload to Trivy Dashboard
+        run: |
+          curl -L https://github.com/theo-mrn/trivy_dashboard/releases/latest/download/trivy-push-linux-amd64 -o trivy-push
+          chmod +x trivy-push
+          ./trivy-push config --url ${{ secrets.DASHBOARD_URL }} --key ${{ secrets.DASHBOARD_API_KEY }}
+          ./trivy-push push --project ${{ github.repository }} --file trivy-report.json
+
+  deploy:
+    needs: push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            docker pull ${{ secrets.DOCKER_USERNAME }}/test67:latest
+            docker stop test67 || true
+            docker rm test67 || true
+            docker run -d --name test67 --restart unless-stopped -p 127.0.0.1:3000:3000 ${{ secrets.DOCKER_USERNAME }}/test67:latest
+            which caddy || (apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list && apt-get update && apt-get install -y caddy)
+            cat > /etc/caddy/Caddyfile << 'CADDYEOF'
+            snapfolio.art {
+              reverse_proxy localhost:3000
+            }
+            CADDYEOF
+            systemctl reload caddy || systemctl start caddy
+            echo "✓ Deployed: https://snapfolio.art"
+
+
+
+
+

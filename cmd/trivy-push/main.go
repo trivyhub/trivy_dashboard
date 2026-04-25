@@ -21,7 +21,65 @@ type PushPayload struct {
 	ProjectName string          `json:"project_name"`
 	Environment string          `json:"environment"`
 	Owner       string          `json:"owner"`
+	PipelineID  string          `json:"pipeline_id,omitempty"`
+	PipelineURL string          `json:"pipeline_url,omitempty"`
 	Report      json.RawMessage `json:"report"`
+}
+
+type CIInfo struct {
+	Provider    string
+	PipelineID  string
+	PipelineURL string
+}
+
+// detectCI lit les variables d'environnement standard des principaux CI.
+func detectCI() CIInfo {
+	// GitHub Actions
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		runID := os.Getenv("GITHUB_RUN_ID")
+		repo := os.Getenv("GITHUB_REPOSITORY")
+		serverURL := os.Getenv("GITHUB_SERVER_URL")
+		url := ""
+		if repo != "" && runID != "" {
+			url = serverURL + "/" + repo + "/actions/runs/" + runID
+		}
+		return CIInfo{Provider: "github", PipelineID: runID, PipelineURL: url}
+	}
+	// GitLab CI
+	if os.Getenv("GITLAB_CI") == "true" {
+		id := os.Getenv("CI_PIPELINE_ID")
+		url := os.Getenv("CI_PIPELINE_URL")
+		return CIInfo{Provider: "gitlab", PipelineID: id, PipelineURL: url}
+	}
+	// CircleCI
+	if os.Getenv("CIRCLECI") == "true" {
+		id := os.Getenv("CIRCLE_WORKFLOW_ID")
+		url := os.Getenv("CIRCLE_BUILD_URL")
+		return CIInfo{Provider: "circleci", PipelineID: id, PipelineURL: url}
+	}
+	// Jenkins
+	if os.Getenv("JENKINS_URL") != "" {
+		id := os.Getenv("BUILD_NUMBER")
+		url := os.Getenv("BUILD_URL")
+		return CIInfo{Provider: "jenkins", PipelineID: id, PipelineURL: url}
+	}
+	// Bitbucket Pipelines
+	if os.Getenv("BITBUCKET_PIPELINE_UUID") != "" {
+		id := os.Getenv("BITBUCKET_BUILD_NUMBER")
+		url := ""
+		if ws := os.Getenv("BITBUCKET_WORKSPACE"); ws != "" {
+			repo := os.Getenv("BITBUCKET_REPO_SLUG")
+			url = "https://bitbucket.org/" + ws + "/" + repo + "/pipelines/" + id
+		}
+		return CIInfo{Provider: "bitbucket", PipelineID: id, PipelineURL: url}
+	}
+	// Azure DevOps
+	if os.Getenv("TF_BUILD") == "True" {
+		id := os.Getenv("BUILD_BUILDNUMBER")
+		url := os.Getenv("SYSTEM_TEAMFOUNDATIONSERVERURI") + os.Getenv("SYSTEM_TEAMPROJECT") + "/_build/results?buildId=" + os.Getenv("BUILD_BUILDID")
+		return CIInfo{Provider: "azure", PipelineID: id, PipelineURL: url}
+	}
+	return CIInfo{}
 }
 
 func configPath() string {
@@ -113,10 +171,17 @@ func main() {
 				return fmt.Errorf("aucun rapport reçu — utilise --file ou pipe depuis trivy")
 			}
 
+			ci := detectCI()
+			if ci.Provider != "" {
+				fmt.Printf("⚡ CI détecté: %s (pipeline %s)\n", ci.Provider, ci.PipelineID)
+			}
+
 			payload := PushPayload{
 				ProjectName: project,
 				Environment: env,
 				Owner:       owner,
+				PipelineID:  ci.PipelineID,
+				PipelineURL: ci.PipelineURL,
 				Report:      json.RawMessage(raw),
 			}
 			body, _ := json.Marshal(payload)
