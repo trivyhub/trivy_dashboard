@@ -1,0 +1,513 @@
+openapi: 3.0.3
+info:
+  title: Trivy Dashboard API
+  version: 1.1.0
+  description: API centralisée pour collecter et visualiser les rapports Trivy par organisation.
+
+servers:
+  - url: http://localhost:8080
+    description: Local
+
+security: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT obtenu via /auth/login ou /auth/register
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "Clé API générée depuis le dashboard. Format : `ApiKey tvd_xxx`"
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        organization_id:
+          type: integer
+        email:
+          type: string
+        role:
+          type: string
+          enum: [owner, admin, member, viewer]
+        created_at:
+          type: string
+          format: date-time
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+
+    APIKey:
+      type: object
+      properties:
+        id:
+          type: integer
+        organization_id:
+          type: integer
+        name:
+          type: string
+        key_prefix:
+          type: string
+          example: tvd_0d450e
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked:
+          type: boolean
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: integer
+        organization_id:
+          type: integer
+        name:
+          type: string
+        environment:
+          type: string
+          example: production
+        owner:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_scan:
+          type: string
+          format: date-time
+          nullable: true
+        total_scans:
+          type: integer
+        critical:
+          type: integer
+        high:
+          type: integer
+        medium:
+          type: integer
+        low:
+          type: integer
+
+    Vulnerability:
+      type: object
+      properties:
+        id:
+          type: integer
+        scan_id:
+          type: integer
+        cve_id:
+          type: string
+          example: CVE-2023-44487
+        severity:
+          type: string
+          enum: [CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN]
+        package_name:
+          type: string
+        installed_version:
+          type: string
+        fixed_version:
+          type: string
+        title:
+          type: string
+        is_fixed:
+          type: boolean
+        first_seen_at:
+          type: string
+          format: date-time
+
+    DiffResult:
+      type: object
+      properties:
+        current_scan_id:
+          type: integer
+        previous_scan_id:
+          type: integer
+        new_vulnerabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Vulnerability'
+        resolved_vulnerabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Vulnerability'
+
+paths:
+
+  /healthz:
+    get:
+      summary: Healthcheck
+      tags: [System]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example:
+                status: ok
+
+  # ── Auth ────────────────────────────────────────────────────────────────────
+
+  /api/v1/auth/register:
+    post:
+      summary: Créer une organisation et un compte owner
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [org_name, email, password]
+              properties:
+                org_name:
+                  type: string
+                  example: acme
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        '201':
+          description: Compte créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '409':
+          description: Organisation ou email déjà utilisé
+
+  /api/v1/auth/login:
+    post:
+      summary: Se connecter
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Connecté
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Identifiants invalides
+
+  /api/v1/auth/me:
+    get:
+      summary: Retourner le user connecté
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User courant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /api/v1/auth/password:
+    put:
+      summary: Changer son mot de passe
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+                  minLength: 8
+      responses:
+        '200':
+          description: Mot de passe mis à jour
+        '401':
+          description: Mot de passe actuel incorrect
+
+  # ── API Keys ────────────────────────────────────────────────────────────────
+
+  /api/v1/api-keys:
+    get:
+      summary: Lister les clés API de l'organisation
+      tags: [API Keys]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Liste des clés
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/APIKey'
+    post:
+      summary: Créer une clé API
+      tags: [API Keys]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: github-actions
+      responses:
+        '201':
+          description: Clé créée — la valeur complète n'est retournée qu'une seule fois
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIKey'
+                  - type: object
+                    properties:
+                      key:
+                        type: string
+                        example: tvd_0d450ea4e08ecf354fac191e2d6366f94205fdefe66c3780ba3a96bef5d49ed8
+
+  /api/v1/api-keys/{id}:
+    delete:
+      summary: Révoquer une clé API
+      tags: [API Keys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Clé révoquée
+
+  # ── Members ─────────────────────────────────────────────────────────────────
+
+  /api/v1/members:
+    get:
+      summary: Lister les membres de l'organisation
+      tags: [Members]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Liste des membres
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+
+  /api/v1/members/invite:
+    post:
+      summary: Inviter un membre (admin+)
+      tags: [Members]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                  enum: [admin, member, viewer]
+      responses:
+        '201':
+          description: Membre invité avec mot de passe temporaire
+        '409':
+          description: Email déjà utilisé
+
+  /api/v1/members/{id}/role:
+    put:
+      summary: Changer le rôle d'un membre (owner uniquement)
+      tags: [Members]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [admin, member, viewer]
+      responses:
+        '200':
+          description: Rôle mis à jour
+
+  /api/v1/members/{id}:
+    delete:
+      summary: Supprimer un membre (owner uniquement)
+      tags: [Members]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Membre supprimé
+
+  # ── Reports ─────────────────────────────────────────────────────────────────
+
+  /api/v1/report:
+    post:
+      summary: Envoyer un rapport Trivy (member+)
+      tags: [Reports]
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_name, report]
+              properties:
+                project_name:
+                  type: string
+                  example: my-app
+                environment:
+                  type: string
+                  example: production
+                owner:
+                  type: string
+                  example: team-backend
+                report:
+                  type: object
+                  description: Rapport JSON brut de Trivy
+      responses:
+        '201':
+          description: Rapport ingéré
+          content:
+            application/json:
+              example:
+                scan_id: 42
+                project: my-app
+                vulnerabilities_stored: 17
+
+  # ── Projects ────────────────────────────────────────────────────────────────
+
+  /api/v1/projects:
+    get:
+      summary: Lister les projets avec résumé des CVE
+      tags: [Projects]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Liste des projets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+
+  /api/v1/projects/{name}/diff:
+    get:
+      summary: Diff entre les deux derniers scans d'un projet
+      tags: [Projects]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CVE nouvelles et résolues
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiffResult'
+
+  # ── Vulnerabilities ─────────────────────────────────────────────────────────
+
+  /api/v1/vulnerabilities:
+    get:
+      summary: Toutes les CVE du dernier scan de chaque projet
+      tags: [Vulnerabilities]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Liste des vulnérabilités triées par sévérité
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Vulnerability'
