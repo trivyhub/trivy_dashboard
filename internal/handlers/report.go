@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -48,7 +49,7 @@ func (h *Handler) IngestReport(c *gin.Context) {
 	}
 
 	rawJSON, _ := json.Marshal(req.Report)
-	scan, err := h.repo.CreateScan(ctx, project.ID, req.Report.ArtifactName, digest, rawJSON)
+	scan, err := h.repo.CreateScan(ctx, project.ID, req.Report.ArtifactName, digest, req.PipelineID, req.PipelineURL, rawJSON)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create scan"})
 		return
@@ -140,6 +141,41 @@ func (h *Handler) GetDiff(c *gin.Context) {
 		PreviousScanID:          scans[1].ID,
 		CurrentScanID:           scans[0].ID,
 	})
+}
+
+// GET /api/v1/projects/:name/scans
+func (h *Handler) ListScans(c *gin.Context) {
+	claims := claimsFromCtx(c)
+	ctx := c.Request.Context()
+
+	project, err := h.repo.GetProjectByName(ctx, claims.OrganizationID, c.Param("name"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+
+	scans, err := h.repo.ListScans(ctx, project.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list scans"})
+		return
+	}
+	c.JSON(http.StatusOK, scans)
+}
+
+// GET /api/v1/scans/:id/vulnerabilities
+func (h *Handler) GetScanVulnerabilities(c *gin.Context) {
+	var scanID int
+	if _, err := fmt.Sscan(c.Param("id"), &scanID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scan id"})
+		return
+	}
+
+	vulns, err := h.repo.GetVulnerabilitiesByScan(c.Request.Context(), scanID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get vulnerabilities"})
+		return
+	}
+	c.JSON(http.StatusOK, vulns)
 }
 
 // GET /api/v1/vulnerabilities
