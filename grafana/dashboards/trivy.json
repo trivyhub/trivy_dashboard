@@ -1,0 +1,174 @@
+{
+  "title": "Trivy Security Dashboard",
+  "uid": "trivy-main",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5m",
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "severity",
+        "label": "Sévérité",
+        "type": "custom",
+        "query": "CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN",
+        "includeAll": true,
+        "allValue": "%",
+        "multi": false,
+        "current": {}
+      },
+      {
+        "name": "project",
+        "label": "Projet",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+        "query": "SELECT DISTINCT name FROM projects ORDER BY name",
+        "includeAll": true,
+        "allValue": "%",
+        "multi": false,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "CRITICAL",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }] }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+        "rawSql": "SELECT COUNT(*) as value FROM vulnerabilities v JOIN scans s ON s.id = v.scan_id JOIN projects p ON p.id = s.project_id WHERE v.severity = 'CRITICAL' AND s.id = (SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1)",
+        "format": "table", "refId": "A"
+      }]
+    },
+    {
+      "id": 2,
+      "title": "HIGH",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+        "rawSql": "SELECT COUNT(*) as value FROM vulnerabilities v JOIN scans s ON s.id = v.scan_id JOIN projects p ON p.id = s.project_id WHERE v.severity = 'HIGH' AND s.id = (SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1)",
+        "format": "table", "refId": "A"
+      }]
+    },
+    {
+      "id": 3,
+      "title": "MEDIUM",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "yellow", "value": null }] }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+        "rawSql": "SELECT COUNT(*) as value FROM vulnerabilities v JOIN scans s ON s.id = v.scan_id JOIN projects p ON p.id = s.project_id WHERE v.severity = 'MEDIUM' AND s.id = (SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1)",
+        "format": "table", "refId": "A"
+      }]
+    },
+    {
+      "id": 4,
+      "title": "LOW",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+        "rawSql": "SELECT COUNT(*) as value FROM vulnerabilities v JOIN scans s ON s.id = v.scan_id JOIN projects p ON p.id = s.project_id WHERE v.severity = 'LOW' AND s.id = (SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1)",
+        "format": "table", "refId": "A"
+      }]
+    },
+    {
+      "id": 5,
+      "title": "Critiques avec correctif disponible",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+        "rawSql": "SELECT COUNT(*) as value FROM vulnerabilities v JOIN scans s ON s.id = v.scan_id JOIN projects p ON p.id = s.project_id WHERE v.severity = 'CRITICAL' AND v.is_fixed = true AND s.id = (SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1)",
+        "format": "table", "refId": "A"
+      }]
+    },
+    {
+      "id": 6,
+      "title": "Toutes les vulnérabilités",
+      "type": "table",
+      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 3 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "options": { "footer": { "show": false } },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "severity_order" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "severity" },
+            "properties": [
+              { "id": "custom.width", "value": 110 },
+              { "id": "custom.displayMode", "value": "color-background" },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [{ "color": "blue", "value": null }]
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "CRITICAL": { "color": "dark-red",    "index": 0 } } },
+                  { "type": "value", "options": { "HIGH":     { "color": "orange",      "index": 1 } } },
+                  { "type": "value", "options": { "MEDIUM":   { "color": "yellow",      "index": 2 } } },
+                  { "type": "value", "options": { "LOW":      { "color": "blue",        "index": 3 } } }
+                ]
+              }
+            ]
+          },
+          { "matcher": { "id": "byName", "options": "is_fixed"   }, "properties": [{ "id": "custom.width", "value": 80  }] },
+          { "matcher": { "id": "byName", "options": "project"    }, "properties": [{ "id": "custom.width", "value": 130 }] },
+          { "matcher": { "id": "byName", "options": "cve_id"     }, "properties": [{ "id": "custom.width", "value": 170 }] },
+          { "matcher": { "id": "byName", "options": "package_name" }, "properties": [{ "id": "custom.width", "value": 150 }] }
+        ]
+      },
+      "targets": [{
+        "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+        "rawSql": "SELECT CASE v.severity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 WHEN 'LOW' THEN 4 ELSE 5 END as severity_order, v.severity, p.name as project, v.cve_id, v.package_name, v.installed_version, v.fixed_version, v.is_fixed, v.title FROM vulnerabilities v JOIN scans s ON s.id = v.scan_id JOIN projects p ON p.id = s.project_id WHERE s.id = (SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1) AND v.severity::text LIKE '${severity}' AND p.name LIKE '${project}' ORDER BY severity_order, p.name, v.cve_id",
+        "format": "table", "refId": "A"
+      }]
+    }
+  ]
+}
