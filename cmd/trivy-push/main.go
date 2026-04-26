@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -97,6 +98,39 @@ func loadConfig() (Config, error) {
 	return cfg, err
 }
 
+// detectEnv devine l'environnement depuis la branche git ou les vars CI.
+func detectEnv() string {
+	// Variable CI explicite (GitLab)
+	if e := os.Getenv("CI_ENVIRONMENT_NAME"); e != "" {
+		return e
+	}
+	// Branche git
+	branch := os.Getenv("GITHUB_REF_NAME")
+	if branch == "" {
+		branch = os.Getenv("CI_COMMIT_BRANCH")
+	}
+	if branch == "" {
+		// lecture locale
+		data, err := os.ReadFile(".git/HEAD")
+		if err == nil {
+			line := strings.TrimSpace(string(data))
+			if strings.HasPrefix(line, "ref: refs/heads/") {
+				branch = strings.TrimPrefix(line, "ref: refs/heads/")
+			}
+		}
+	}
+	switch branch {
+	case "main", "master":
+		return "production"
+	case "develop", "dev", "development":
+		return "staging"
+	case "":
+		return "production"
+	default:
+		return "development"
+	}
+}
+
 func doRequest(method, url, auth string, body []byte) (*http.Response, []byte, error) {
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
@@ -176,6 +210,11 @@ func main() {
 				fmt.Printf("⚡ CI détecté: %s (pipeline %s)\n", ci.Provider, ci.PipelineID)
 			}
 
+			if env == "" {
+				env = detectEnv()
+				fmt.Printf("⚡ Environnement détecté: %s\n", env)
+			}
+
 			payload := PushPayload{
 				ProjectName: project,
 				Environment: env,
@@ -202,12 +241,35 @@ func main() {
 		},
 	}
 	cmdPush.Flags().StringVarP(&project, "project", "p", "", "Nom du projet (obligatoire)")
-	cmdPush.Flags().StringVarP(&env, "env", "e", "production", "Environnement")
+	cmdPush.Flags().StringVarP(&env, "env", "e", "", "Environnement (auto-détecté depuis la branche si vide)")
 	cmdPush.Flags().StringVarP(&owner, "owner", "o", "", "Équipe propriétaire")
 	cmdPush.Flags().StringVarP(&file, "file", "f", "", "Fichier JSON Trivy (sinon stdin)")
 	cmdPush.MarkFlagRequired("project")
 
-	root.AddCommand(cmdConfig, cmdPush)
+	// ── status ────────────────────────────────────────────────────────────────
+	cmdStatus := &cobra.Command{
+		Use:   "status",
+		Short: "Vérifier la connectivité avec le dashboard",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			fmt.Printf("→ URL: %s\n", cfg.URL)
+			resp, _, err := doRequest("GET", cfg.URL+"/healthz", "ApiKey "+cfg.APIKey, nil)
+			if err != nil {
+				return fmt.Errorf("✗ Dashboard injoignable: %w", err)
+			}
+			if resp.StatusCode == 200 {
+				fmt.Println("✓ Dashboard OK")
+			} else {
+				fmt.Printf("✗ Status inattendu: %d\n", resp.StatusCode)
+			}
+			return nil
+		},
+	}
+
+	root.AddCommand(cmdConfig, cmdPush, cmdStatus)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
