@@ -1,35 +1,38 @@
-# Trivy Dashboard
+# TrivyHub — Backend API
 
-Plateforme centralisée pour collecter et visualiser les rapports de vulnérabilités [Trivy](https://github.com/aquasecurity/trivy) par organisation et par projet.
+Centralized vulnerability management platform. Collects Trivy scan reports from CI/CD pipelines and exposes them via a REST API.
 
-![Go](https://img.shields.io/badge/Go-1.23-blue) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue) ![Docker](https://img.shields.io/badge/Docker-compose-2496ED)
+![Go](https://img.shields.io/badge/Go-1.23-blue) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue) ![Docker](https://img.shields.io/badge/Docker-ready-2496ED)
+
+**Live API:** https://api.trivyhub.fr  
+**Dashboard:** https://dashboard.trivyhub.fr
+
+---
 
 ---
 
 ## Architecture
 
 ```
-Pipeline CI/CD
+CI/CD Pipeline
      │
-     │  trivy image --format json mon-image | trivy-push push --project mon-app
+     │  trivy image --format json my-image | trivy-push push --project my-app
      ▼
-API Go (port 8080)  ──►  PostgreSQL
+Go API (port 8080)  ──►  PostgreSQL
      ▲
      │  REST API
-Frontend Next.js (repo séparé)
+Next.js Frontend (separate repo)
 ```
-
-Chaque organisation a ses propres projets, scans et membres. Les données sont totalement isolées entre organisations.
 
 ---
 
-## Démarrage rapide
+## Quick start
 
-### Prérequis
+### Prerequisites
 
-- [Docker](https://www.docker.com/products/docker-desktop) & Docker Compose
+- Docker & Docker Compose
 
-### Lancer le stack
+### Run locally
 
 ```bash
 git clone https://github.com/theo-mrn/trivy_dashboard.git
@@ -37,34 +40,21 @@ cd trivy_dashboard
 docker compose up -d
 ```
 
-L'API est disponible sur **http://localhost:8080**
+API available at **http://localhost:8080**
 
-### Créer un compte
+### Create an account & get an API key
 
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"org_name":"mon-org","email":"admin@mon-org.com","password":"motdepasse"}'
-```
+Go to **https://dashboard.trivyhub.fr** → Register → Settings → API Keys.
 
-### Créer une clé API pour les pipelines
-
-```bash
-curl -X POST http://localhost:8080/api/v1/api-keys \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"github-actions"}'
-```
-
-La clé retournée (`tvd_xxx...`) n'est affichée **qu'une seule fois**.
+The key (`tvd_xxx...`) is shown **only once** — copy it immediately.
 
 ---
 
-## CLI — trivy-push
+## trivy-push CLI
 
-`trivy-push` est la CLI qui envoie les rapports Trivy vers le dashboard depuis n'importe quelle pipeline.
+Push Trivy reports to the dashboard from any pipeline.
 
-### Installation
+### Install
 
 **Mac Apple Silicon**
 ```bash
@@ -84,52 +74,62 @@ curl -L https://github.com/theo-mrn/trivy_dashboard/releases/latest/download/tri
 chmod +x trivy-push && sudo mv trivy-push /usr/local/bin/
 ```
 
-### Configuration (une seule fois)
+### Configure (once)
 
 ```bash
-trivy-push config --url https://ton-dashboard.com --key tvd_xxx
+trivy-push config --url https://api.trivyhub.fr --key tvd_xxx
 ```
 
-La config est sauvegardée dans `~/.trivy-push.json`.
+Config saved in `~/.trivy-push.json`.
 
-### Utilisation
+### Usage
 
 ```bash
-# Pipe direct depuis Trivy
-trivy image --format json mon-image:latest | trivy-push push --project mon-app
+# Pipe from Trivy
+trivy image --format json my-image:latest | trivy-push push --project my-app
 
-# Depuis un fichier
-trivy-push push --project mon-app --file report.json
+# From file
+trivy-push push --project my-app --file report.json
 
-# Avec toutes les options
-trivy-push push --project mon-app --env production --owner team-backend --file report.json
+# Check connectivity
+trivy-push status
 ```
 
-| Option | Alias | Description | Défaut |
-|--------|-------|-------------|--------|
-| `--project` | `-p` | Nom du projet **(obligatoire)** | — |
-| `--env` | `-e` | Environnement | `production` |
-| `--owner` | `-o` | Équipe propriétaire | — |
-| `--file` | `-f` | Fichier JSON (sinon stdin) | stdin |
+| Flag | Alias | Description | Default |
+|------|-------|-------------|---------|
+| `--project` | `-p` | Project name **(required)** | — |
+| `--env` | `-e` | Environment (auto-detected from branch) | auto |
+| `--owner` | `-o` | Team owner | — |
+| `--file` | `-f` | JSON file (or stdin) | stdin |
+
+**Environment auto-detection:**
+- Branch `main` / `master` → `production`
+- Branch `develop` / `dev` → `staging`
+- Other branches → `development`
+
+**CI auto-detection:** Pipeline ID and URL are automatically read from GitHub Actions, GitLab CI, CircleCI, Jenkins, Bitbucket, Azure DevOps — no manual flags needed.
 
 ---
 
-## Intégration CI/CD
+## GitHub Action (recommended)
 
-### GitHub Actions
+Use the reusable action in any repo — 2 lines:
 
 ```yaml
-- name: Install trivy-push
-  run: |
-    curl -L https://github.com/theo-mrn/trivy_dashboard/releases/latest/download/trivy-push-linux-amd64 -o trivy-push
-    chmod +x trivy-push && sudo mv trivy-push /usr/local/bin/
-    trivy-push config --url ${{ secrets.DASHBOARD_URL }} --key ${{ secrets.DASHBOARD_API_KEY }}
-
-- name: Scan & Upload
-  run: |
-    trivy image --format json mon-image:${{ github.sha }} | \
-      trivy-push push --project ${{ github.repository }}
+- name: Scan & push to TrivyHub
+  uses: theo-mrn/trivy_dashboard/.github/actions/trivy-push@main
+  with:
+    image: my-org/my-app:latest
+    api-key: ${{ secrets.TRIVYHUB_API_KEY }}
 ```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `image` | ✓ | — | Docker image to scan |
+| `api-key` | ✓ | — | TrivyHub API key |
+| `project` | — | `github.repository` | Project name |
+| `environment` | — | `production` | Environment |
+| `url` | — | `https://api.trivyhub.fr` | API URL |
 
 ### GitLab CI
 
@@ -138,93 +138,104 @@ security-scan:
   script:
     - curl -L https://github.com/theo-mrn/trivy_dashboard/releases/latest/download/trivy-push-linux-amd64 -o /usr/local/bin/trivy-push
     - chmod +x /usr/local/bin/trivy-push
-    - trivy-push config --url $DASHBOARD_URL --key $DASHBOARD_API_KEY
+    - trivy-push config --url $TRIVYHUB_URL --key $TRIVYHUB_API_KEY
     - trivy image --format json $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA | trivy-push push --project $CI_PROJECT_NAME
 ```
 
 ---
 
-## Rôles et permissions
+## Roles & permissions
 
 | Action | viewer | member | admin | owner |
 |--------|--------|--------|-------|-------|
-| Voir CVE / projets | ✓ | ✓ | ✓ | ✓ |
-| Push rapport | ✗ | ✓ | ✓ | ✓ |
-| Gérer les clés API | ✗ | ✗ | ✓ | ✓ |
-| Inviter des membres | ✗ | ✗ | ✓ | ✓ |
-| Changer les rôles | ✗ | ✗ | ✗ | ✓ |
-| Supprimer des membres | ✗ | ✗ | ✗ | ✓ |
+| View CVEs / projects | ✓ | ✓ | ✓ | ✓ |
+| Push report | ✗ | ✓ | ✓ | ✓ |
+| Manage API keys | ✗ | ✗ | ✓ | ✓ |
+| Invite members | ✗ | ✗ | ✓ | ✓ |
+| Change roles | ✗ | ✗ | ✗ | ✓ |
+| Remove members | ✗ | ✗ | ✗ | ✓ |
 
 ---
 
-## API
+## API Reference
 
-La documentation complète est disponible dans [`api/openapi.yaml`](api/openapi.yaml).
+Full spec: [`api/openapi.yaml`](api/openapi.yaml)
 
-### Authentification
+### Authentication
 
-Deux méthodes selon le contexte :
-
-**JWT** — pour le site web
 ```
-Authorization: Bearer <token>
-```
-
-**Clé API** — pour les pipelines CI/CD
-```
-Authorization: ApiKey tvd_xxx...
+Authorization: Bearer <jwt>      # Web app
+Authorization: ApiKey tvd_xxx    # CI/CD pipelines
 ```
 
 ### Endpoints
 
-| Méthode | Endpoint | Rôle requis | Description |
-|---------|----------|-------------|-------------|
-| GET | `/healthz` | — | Healthcheck |
-| POST | `/api/v1/auth/register` | — | Créer org + compte owner |
-| POST | `/api/v1/auth/login` | — | Se connecter |
-| GET | `/api/v1/auth/me` | tous | User connecté |
-| PUT | `/api/v1/auth/password` | tous | Changer mot de passe |
-| POST | `/api/v1/report` | member+ | Envoyer un rapport Trivy |
-| GET | `/api/v1/projects` | viewer+ | Lister les projets |
-| GET | `/api/v1/projects/:name/diff` | viewer+ | Diff entre deux scans |
-| GET | `/api/v1/vulnerabilities` | viewer+ | Toutes les CVE |
-| GET | `/api/v1/members` | viewer+ | Lister les membres |
-| POST | `/api/v1/members/invite` | admin+ | Inviter un membre |
-| PUT | `/api/v1/members/:id/role` | owner | Changer un rôle |
-| DELETE | `/api/v1/members/:id` | owner | Supprimer un membre |
-| GET | `/api/v1/api-keys` | admin+ | Lister les clés API |
-| POST | `/api/v1/api-keys` | admin+ | Créer une clé API |
-| DELETE | `/api/v1/api-keys/:id` | admin+ | Révoquer une clé API |
+| Method | Endpoint | Role | Description |
+|--------|----------|------|-------------|
+| GET | `/healthz` | — | Health check |
+| POST | `/api/v1/auth/register` | — | Create org + owner account |
+| POST | `/api/v1/auth/login` | — | Sign in |
+| GET | `/api/v1/auth/me` | any | Current user |
+| PUT | `/api/v1/auth/password` | any | Change password |
+| POST | `/api/v1/report` | member+ | Ingest Trivy report |
+| GET | `/api/v1/projects` | viewer+ | List projects |
+| GET | `/api/v1/projects/scans?name=` | viewer+ | Scan history for a project |
+| GET | `/api/v1/projects/diff?name=` | viewer+ | Diff between last two scans |
+| GET | `/api/v1/scans/:id/vulnerabilities` | viewer+ | CVEs for a specific scan |
+| GET | `/api/v1/vulnerabilities` | viewer+ | Latest CVEs (paginated) |
+| GET | `/api/v1/members` | viewer+ | List members |
+| POST | `/api/v1/members/invite` | admin+ | Invite member |
+| PUT | `/api/v1/members/:id/role` | owner | Update role |
+| DELETE | `/api/v1/members/:id` | owner | Remove member |
+| GET | `/api/v1/api-keys` | admin+ | List API keys |
+| POST | `/api/v1/api-keys` | admin+ | Create API key |
+| DELETE | `/api/v1/api-keys/:id` | admin+ | Revoke API key |
+
+### Pagination
+
+`GET /api/v1/vulnerabilities?page=1&limit=100&severity=CRITICAL`
 
 ---
 
-## Variables d'environnement
+## Environment variables
 
-| Variable | Description | Défaut |
-|----------|-------------|--------|
-| `DATABASE_URL` | URL PostgreSQL | — |
-| `JWT_SECRET` | Secret pour signer les JWT | `dev-secret-change-in-prod` |
-| `PORT` | Port d'écoute | `8080` |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_URL` | PostgreSQL connection string | required |
+| `JWT_SECRET` | JWT signing secret | `dev-secret-change-in-prod` |
+| `MIGRATIONS_DIR` | Path to SQL migrations | `migrations` |
+| `PORT` | Listen port | `8080` |
 
 ---
 
-## Commandes utiles
+## Production deployment
 
 ```bash
-make up          # Démarrer le stack
-make down        # Arrêter le stack
-make logs        # Logs de l'API
-make db-shell    # Shell PostgreSQL
+# Create network
+docker network create trivy-net
+
+# PostgreSQL
+docker run -d --name postgres --network trivy-net \
+  -e POSTGRES_USER=trivy -e POSTGRES_PASSWORD=trivy -e POSTGRES_DB=trivy \
+  postgres:16-alpine
+
+# API (migrations run automatically on startup)
+docker run -d --name trivy-dashboard --network trivy-net \
+  -p 8080:8080 \
+  -e DATABASE_URL="postgres://trivy:trivy@postgres:5432/trivy" \
+  -e JWT_SECRET="your-secret" \
+  theo-mrn/trivy-dashboard:latest
 ```
 
 ---
 
-## Stack technique
+## Stack
 
-| Composant | Technologie |
-|-----------|-------------|
-| Backend | Go 1.23 + Gin |
-| Base de données | PostgreSQL 16 |
+| Component | Technology |
+|-----------|------------|
+| API | Go 1.23 + Gin |
+| Database | PostgreSQL 16 |
 | CLI | Go + Cobra |
-| Conteneurisation | Docker Compose |
-| Frontend | Next.js (repo séparé) |
+| Auth | JWT + API keys |
+| Rate limiting | 60 req/min per IP |
+| Migrations | Auto-run at startup |

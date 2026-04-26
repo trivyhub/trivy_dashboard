@@ -70,8 +70,8 @@ func main() {
 		protected := api.Group("/", middleware.Auth(jwtSecret, repo))
 		{
 			protected.GET("/projects", h.ListProjects)
-			protected.GET("/projects/:name/diff", h.GetDiff)
-			protected.GET("/projects/:name/scans", h.ListScans)
+			protected.GET("/projects/diff", h.GetDiff)
+			protected.GET("/projects/scans", h.ListScans)
 			protected.GET("/scans/:id/vulnerabilities", h.GetScanVulnerabilities)
 			protected.GET("/vulnerabilities", h.ListVulnerabilities)
 			protected.GET("/members", h.ListMembers)

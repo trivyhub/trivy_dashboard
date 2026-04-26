@@ -99,7 +99,7 @@ func (h *Handler) GetDiff(c *gin.Context) {
 	claims := claimsFromCtx(c)
 	ctx := c.Request.Context()
 
-	project, err := h.repo.GetProjectByName(ctx, claims.OrganizationID, c.Param("name"))
+	project, err := h.repo.GetProjectByName(ctx, claims.OrganizationID, c.Query("name"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
 		return
@@ -148,7 +148,7 @@ func (h *Handler) ListScans(c *gin.Context) {
 	claims := claimsFromCtx(c)
 	ctx := c.Request.Context()
 
-	project, err := h.repo.GetProjectByName(ctx, claims.OrganizationID, c.Param("name"))
+	project, err := h.repo.GetProjectByName(ctx, claims.OrganizationID, c.Query("name"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
 		return
