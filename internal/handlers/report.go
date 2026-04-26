@@ -66,7 +66,7 @@ func (h *Handler) IngestReport(c *gin.Context) {
 				InstalledVersion: v.InstalledVersion,
 				FixedVersion:     v.FixedVersion,
 				Title:            v.Title,
-				IsFixed:          v.FixedVersion != "",
+				IsFixed:          false,
 			})
 		}
 	}
