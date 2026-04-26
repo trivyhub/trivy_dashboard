@@ -34,8 +34,20 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  deploy:
+  scan:
     needs: push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan & push to TrivyHub
+        uses: theo-mrn/trivy_dashboard/.github/actions/trivy-push@main
+        with:
+          image: ${{ secrets.DOCKER_USERNAME }}/trivy-dashboard:latest
+          api-key: ${{ vars.DASHBOARD_API_KEY }}
+
+  deploy:
+    needs: scan
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
