@@ -9,8 +9,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	limiter "github.com/ulule/limiter/v3"
+	limitergin "github.com/ulule/limiter/v3/drivers/middleware/gin"
+	"github.com/ulule/limiter/v3/drivers/store/memory"
 	"github.com/theomorin/trivy-dashboard/internal/handlers"
 	"github.com/theomorin/trivy-dashboard/internal/middleware"
+	"github.com/theomorin/trivy-dashboard/internal/migrate"
 	"github.com/theomorin/trivy-dashboard/internal/models"
 	"github.com/theomorin/trivy-dashboard/internal/repository"
 )
@@ -20,6 +24,7 @@ func main() {
 
 	dbURL := mustEnv("DATABASE_URL")
 	jwtSecret := getEnv("JWT_SECRET", "dev-secret-change-in-prod")
+	migrationsDir := getEnv("MIGRATIONS_DIR", "migrations")
 	port := getEnv("PORT", "8080")
 
 	db, err := connectDB(dbURL)
@@ -28,11 +33,20 @@ func main() {
 	}
 	defer db.Close()
 
+	if err := migrate.Run(context.Background(), db, migrationsDir); err != nil {
+		log.Fatalf("migrations failed: %v", err)
+	}
+
+	// Rate limiter: 60 req/min par IP
+	rate, _ := limiter.NewRateFromFormatted("60-M")
+	store := memory.NewStore()
+	rateLimiter := limitergin.NewMiddleware(limiter.New(store, rate))
+
 	repo := repository.New(db)
 	h := handlers.New(repo, jwtSecret)
 
 	r := gin.Default()
-
+	r.Use(rateLimiter)
 	r.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
@@ -55,7 +69,6 @@ func main() {
 
 		protected := api.Group("/", middleware.Auth(jwtSecret, repo))
 		{
-			// viewer+ : lecture seule
 			protected.GET("/projects", h.ListProjects)
 			protected.GET("/projects/:name/diff", h.GetDiff)
 			protected.GET("/projects/:name/scans", h.ListScans)
@@ -63,15 +76,12 @@ func main() {
 			protected.GET("/vulnerabilities", h.ListVulnerabilities)
 			protected.GET("/members", h.ListMembers)
 
-			// member+ : push de rapports
 			protected.POST("/report", middleware.RequireRole(models.RoleOwner, models.RoleAdmin, models.RoleMember), h.IngestReport)
 
-			// admin+ : gestion des clés API
 			protected.POST("/api-keys", middleware.RequireRole(models.RoleOwner, models.RoleAdmin), h.CreateAPIKey)
 			protected.GET("/api-keys", middleware.RequireRole(models.RoleOwner, models.RoleAdmin), h.ListAPIKeys)
 			protected.DELETE("/api-keys/:id", middleware.RequireRole(models.RoleOwner, models.RoleAdmin), h.RevokeAPIKey)
 
-			// owner+ : gestion des membres
 			protected.POST("/members/invite", middleware.RequireRole(models.RoleOwner, models.RoleAdmin), h.InviteMember)
 			protected.PUT("/members/:id/role", middleware.RequireRole(models.RoleOwner), h.UpdateMemberRole)
 			protected.DELETE("/members/:id", middleware.RequireRole(models.RoleOwner), h.RemoveMember)
