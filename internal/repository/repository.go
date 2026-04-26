@@ -344,8 +344,30 @@ func (r *Repository) GetVulnerabilitiesByScan(ctx context.Context, scanID int) (
 	return vulns, rows.Err()
 }
 
-func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID int) ([]models.DBVulnerability, error) {
-	rows, err := r.db.Query(ctx, `
+func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID int, severity string, limit, offset int) ([]models.DBVulnerability, int, error) {
+	severityFilter := ""
+	args := []any{orgID}
+	if severity != "" {
+		args = append(args, severity)
+		severityFilter = fmt.Sprintf("AND v.severity = $%d", len(args))
+	}
+
+	// total
+	var total int
+	countSQL := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM vulnerabilities v
+		JOIN scans s ON s.id = v.scan_id
+		JOIN projects p ON p.id = s.project_id
+		WHERE p.organization_id = $1
+		  AND s.id = (SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1)
+		%s
+	`, severityFilter)
+	r.db.QueryRow(ctx, countSQL, args...).Scan(&total)
+
+	// pagination args
+	args = append(args, limit, offset)
+	dataSQL := fmt.Sprintf(`
 		SELECT v.id, v.scan_id, v.cve_id, v.severity, v.package_name,
 		       v.installed_version, v.fixed_version, v.title, v.is_fixed, v.first_seen_at
 		FROM vulnerabilities v
@@ -353,13 +375,17 @@ func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID in
 		JOIN projects p ON p.id = s.project_id
 		WHERE p.organization_id = $1
 		  AND s.id = (SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1)
+		%s
 		ORDER BY CASE v.severity
 			WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2
 			WHEN 'MEDIUM'   THEN 3 WHEN 'LOW'  THEN 4 ELSE 5
 		END, p.name, v.cve_id
-	`, orgID)
+		LIMIT $%d OFFSET $%d
+	`, severityFilter, len(args)-1, len(args))
+
+	rows, err := r.db.Query(ctx, dataSQL, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -370,9 +396,9 @@ func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID in
 			&v.ID, &v.ScanID, &v.CVEID, &v.Severity, &v.PackageName,
 			&v.InstalledVersion, &v.FixedVersion, &v.Title, &v.IsFixed, &v.FirstSeenAt,
 		); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		vulns = append(vulns, v)
 	}
-	return vulns, rows.Err()
+	return vulns, total, rows.Err()
 }

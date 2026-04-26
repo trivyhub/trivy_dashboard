@@ -178,15 +178,34 @@ func (h *Handler) GetScanVulnerabilities(c *gin.Context) {
 	c.JSON(http.StatusOK, vulns)
 }
 
-// GET /api/v1/vulnerabilities
+// GET /api/v1/vulnerabilities?page=1&limit=100&severity=CRITICAL
 func (h *Handler) ListVulnerabilities(c *gin.Context) {
 	claims := claimsFromCtx(c)
-	vulns, err := h.repo.GetLatestVulnerabilitiesByOrg(c.Request.Context(), claims.OrganizationID)
+
+	page := 1
+	limit := 100
+	fmt.Sscan(c.DefaultQuery("page", "1"), &page)
+	fmt.Sscan(c.DefaultQuery("limit", "100"), &limit)
+	if limit > 500 {
+		limit = 500
+	}
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+	severity := c.Query("severity")
+
+	vulns, total, err := h.repo.GetLatestVulnerabilitiesByOrg(c.Request.Context(), claims.OrganizationID, severity, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list vulnerabilities"})
 		return
 	}
-	c.JSON(http.StatusOK, vulns)
+	c.JSON(http.StatusOK, gin.H{
+		"data":  vulns,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
 }
 
 // GET /healthz
