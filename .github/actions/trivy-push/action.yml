@@ -1,0 +1,43 @@
+name: Trivy Push
+description: Scan a Docker image with Trivy and upload the report to TrivyHub
+
+inputs:
+  image:
+    description: Docker image to scan (e.g. myrepo/myapp:latest)
+    required: true
+  api-key:
+    description: TrivyHub API key
+    required: true
+  project:
+    description: Project name (defaults to github.repository)
+    required: false
+    default: ${{ github.repository }}
+  environment:
+    description: Environment (production, staging, development)
+    required: false
+    default: production
+  url:
+    description: TrivyHub API URL
+    required: false
+    default: https://api.trivyhub.fr
+
+runs:
+  using: composite
+  steps:
+    - name: Trivy scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ inputs.image }}
+        format: json
+        output: trivy-report.json
+
+    - name: Push to TrivyHub
+      shell: bash
+      run: |
+        curl -sL https://github.com/theo-mrn/trivy_dashboard/releases/latest/download/trivy-push-linux-amd64 -o trivy-push
+        chmod +x trivy-push
+        ./trivy-push config --url ${{ inputs.url }} --key ${{ inputs.api-key }}
+        ./trivy-push push \
+          --project "${{ inputs.project }}" \
+          --env "${{ inputs.environment }}" \
+          --file trivy-report.json
