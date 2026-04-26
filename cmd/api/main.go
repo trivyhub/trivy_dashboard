@@ -58,6 +58,8 @@ func main() {
 			// viewer+ : lecture seule
 			protected.GET("/projects", h.ListProjects)
 			protected.GET("/projects/:name/diff", h.GetDiff)
+			protected.GET("/projects/:name/scans", h.ListScans)
+			protected.GET("/scans/:id/vulnerabilities", h.GetScanVulnerabilities)
 			protected.GET("/vulnerabilities", h.ListVulnerabilities)
 			protected.GET("/members", h.ListMembers)
 
