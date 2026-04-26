@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Build binaries
+        run: |
+          PLATFORMS=(
+            "linux/amd64"
+            "linux/arm64"
+            "darwin/amd64"
+            "darwin/arm64"
+            "windows/amd64"
+          )
+          mkdir -p dist
+          for PLATFORM in "${PLATFORMS[@]}"; do
+            OS="${PLATFORM%/*}"
+            ARCH="${PLATFORM#*/}"
+            NAME="trivy-push-${OS}-${ARCH}"
+            [ "$OS" = "windows" ] && NAME="${NAME}.exe"
+            GOOS=$OS GOARCH=$ARCH CGO_ENABLED=0 \
+              go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
+              -o "dist/${NAME}" ./cmd/trivy-push
+            echo "✓ Built dist/${NAME}"
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
