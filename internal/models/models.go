@@ -76,6 +76,8 @@ type Vulnerability struct {
 	InstalledVersion string `json:"InstalledVersion"`
 	FixedVersion     string `json:"FixedVersion,omitempty"`
 	Title            string `json:"Title,omitempty"`
+	Description      string `json:"Description,omitempty"`
+	PrimaryURL       string `json:"PrimaryURL,omitempty"`
 	Severity         string `json:"Severity"`
 }
 
@@ -129,6 +131,8 @@ type DBVulnerability struct {
 	InstalledVersion string    `json:"installed_version" db:"installed_version"`
 	FixedVersion     string    `json:"fixed_version" db:"fixed_version"`
 	Title            string    `json:"title" db:"title"`
+	Description      string    `json:"description" db:"description"`
+	PrimaryURL       string    `json:"primary_url" db:"primary_url"`
 	IsFixed          bool      `json:"is_fixed" db:"is_fixed"`
 	FirstSeenAt      time.Time `json:"first_seen_at" db:"first_seen_at"`
 }

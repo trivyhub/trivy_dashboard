@@ -309,9 +309,9 @@ func (r *Repository) BulkInsertVulnerabilities(ctx context.Context, scanID int, 
 	for _, v := range vulns {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO vulnerabilities
-				(scan_id, cve_id, severity, package_name, installed_version, fixed_version, title, is_fixed)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		`, scanID, v.CVEID, v.Severity, v.PackageName, v.InstalledVersion, v.FixedVersion, v.Title, v.IsFixed)
+				(scan_id, cve_id, severity, package_name, installed_version, fixed_version, title, description, primary_url, is_fixed)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`, scanID, v.CVEID, v.Severity, v.PackageName, v.InstalledVersion, v.FixedVersion, v.Title, v.Description, v.PrimaryURL, v.IsFixed)
 		if err != nil {
 			return fmt.Errorf("insert vulnerability %s: %w", v.CVEID, err)
 		}
@@ -322,7 +322,7 @@ func (r *Repository) BulkInsertVulnerabilities(ctx context.Context, scanID int, 
 func (r *Repository) GetVulnerabilitiesByScan(ctx context.Context, scanID int) ([]models.DBVulnerability, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, scan_id, cve_id, severity, package_name,
-		       installed_version, fixed_version, title, is_fixed, first_seen_at
+		       installed_version, fixed_version, title, description, primary_url, is_fixed, first_seen_at
 		FROM vulnerabilities WHERE scan_id = $1
 	`, scanID)
 	if err != nil {
@@ -335,7 +335,7 @@ func (r *Repository) GetVulnerabilitiesByScan(ctx context.Context, scanID int) (
 		var v models.DBVulnerability
 		if err := rows.Scan(
 			&v.ID, &v.ScanID, &v.CVEID, &v.Severity, &v.PackageName,
-			&v.InstalledVersion, &v.FixedVersion, &v.Title, &v.IsFixed, &v.FirstSeenAt,
+			&v.InstalledVersion, &v.FixedVersion, &v.Title, &v.Description, &v.PrimaryURL, &v.IsFixed, &v.FirstSeenAt,
 		); err != nil {
 			return nil, err
 		}
@@ -369,7 +369,7 @@ func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID in
 	args = append(args, limit, offset)
 	dataSQL := fmt.Sprintf(`
 		SELECT v.id, v.scan_id, v.cve_id, v.severity, v.package_name,
-		       v.installed_version, v.fixed_version, v.title, v.is_fixed, v.first_seen_at
+		       v.installed_version, v.fixed_version, v.title, v.description, v.primary_url, v.is_fixed, v.first_seen_at
 		FROM vulnerabilities v
 		JOIN scans s ON s.id = v.scan_id
 		JOIN projects p ON p.id = s.project_id
@@ -394,7 +394,7 @@ func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID in
 		var v models.DBVulnerability
 		if err := rows.Scan(
 			&v.ID, &v.ScanID, &v.CVEID, &v.Severity, &v.PackageName,
-			&v.InstalledVersion, &v.FixedVersion, &v.Title, &v.IsFixed, &v.FirstSeenAt,
+			&v.InstalledVersion, &v.FixedVersion, &v.Title, &v.Description, &v.PrimaryURL, &v.IsFixed, &v.FirstSeenAt,
 		); err != nil {
 			return nil, 0, err
 		}
