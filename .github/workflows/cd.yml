@@ -51,8 +51,9 @@ jobs:
             docker rm trivy-dashboard || true
             docker run -d \
               --name trivy-dashboard \
+              --network trivy-net \
               --restart unless-stopped \
-              -p 127.0.0.1:8080:8080 \
+              -p 8080:8080 \
               -e DATABASE_URL=${{ secrets.DATABASE_URL }} \
               -e JWT_SECRET=${{ secrets.JWT_SECRET }} \
               ${{ secrets.DOCKER_USERNAME }}/trivy-dashboard:latest
