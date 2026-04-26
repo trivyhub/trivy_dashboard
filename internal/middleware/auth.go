@@ -66,6 +66,7 @@ func Auth(secret string, repo *repository.Repository) gin.HandlerFunc {
 				UserID:         0,
 				OrganizationID: apiKey.OrganizationID,
 				Email:          "",
+				Role:           "member",
 			})
 			c.Next()
 			return
