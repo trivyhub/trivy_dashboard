@@ -1,43 +1,105 @@
-name: Trivy Push
-description: Scan a Docker image with Trivy and upload the report to TrivyHub
+name: TrivyHub — Scan & Push
+description: Scan with Trivy and upload the report to TrivyHub
 
 inputs:
-  image:
-    description: Docker image to scan (e.g. myrepo/myapp:latest)
-    required: true
   api-key:
-    description: TrivyHub API key
+    description: TrivyHub API key (store it as a secret)
     required: true
+  image:
+    description: Docker image to scan (e.g. myrepo/myapp:latest). Leave empty to scan the filesystem.
+    required: false
+    default: ""
   project:
-    description: Project name (defaults to github.repository)
+    description: Project name in TrivyHub. Defaults to the repository name.
     required: false
     default: ${{ github.repository }}
   environment:
-    description: Environment (production, staging, development)
+    description: "Override environment (production | staging | development). Auto-detected from branch when omitted."
     required: false
-    default: production
+    default: ""
   url:
     description: TrivyHub API URL
     required: false
     default: https://api.trivyhub.fr
 
+outputs:
+  scan_id:
+    description: ID of the scan created in TrivyHub
+    value: ${{ steps.push.outputs.scan_id }}
+  vulnerabilities_stored:
+    description: Total number of vulnerabilities stored
+    value: ${{ steps.push.outputs.vulnerabilities_stored }}
+  critical:
+    description: Number of CRITICAL vulnerabilities found
+    value: ${{ steps.push.outputs.critical }}
+  high:
+    description: Number of HIGH vulnerabilities found
+    value: ${{ steps.push.outputs.high }}
+
 runs:
   using: composite
   steps:
-    - name: Trivy scan
-      uses: aquasecurity/trivy-action@master
+    - name: Scan — Docker image
+      if: inputs.image != ''
+      uses: aquasecurity/trivy-action@0.30.0
       with:
         image-ref: ${{ inputs.image }}
         format: json
         output: trivy-report.json
+        exit-code: "0"
+
+    - name: Scan — Filesystem
+      if: inputs.image == ''
+      uses: aquasecurity/trivy-action@0.30.0
+      with:
+        scan-type: fs
+        scan-ref: .
+        format: json
+        output: trivy-report.json
+        exit-code: "0"
 
     - name: Push to TrivyHub
+      id: push
       shell: bash
+      env:
+        TRIVYHUB_KEY: ${{ inputs.api-key }}
+        TRIVYHUB_URL: ${{ inputs.url }}
+        INPUT_PROJECT: ${{ inputs.project }}
+        INPUT_ENV: ${{ inputs.environment }}
+        GITHUB_REF_NAME: ${{ github.ref_name }}
       run: |
-        curl -sL https://github.com/theo-mrn/trivy_dashboard/releases/latest/download/trivy-push-linux-amd64 -o trivy-push
+        # Download trivy-push binary from GitHub Releases
+        curl -fsSL https://github.com/trivyhub/trivy_dashboard/releases/latest/download/trivy-push-linux-amd64 -o trivy-push || {
+          echo "::error::Failed to download trivy-push binary"
+          exit 1
+        }
         chmod +x trivy-push
-        ./trivy-push config --url ${{ inputs.url }} --key ${{ inputs.api-key }}
-        ./trivy-push push \
-          --project "${{ inputs.project }}" \
-          --env "${{ inputs.environment }}" \
-          --file trivy-report.json
+
+        # Auto-detect environment from branch if not provided
+        if [ -z "$INPUT_ENV" ]; then
+          case "$GITHUB_REF_NAME" in
+            main|master)       INPUT_ENV="production"  ;;
+            develop|dev)       INPUT_ENV="staging"     ;;
+            *)                 INPUT_ENV="development" ;;
+          esac
+        fi
+
+        # Push and capture JSON response
+        RESPONSE=$(./trivy-push push \
+          --project  "$INPUT_PROJECT" \
+          --env      "$INPUT_ENV" \
+          --file     trivy-report.json \
+          --output   json)
+
+        if [ $? -ne 0 ]; then
+          echo "::error::trivy-push failed: $RESPONSE"
+          exit 1
+        fi
+
+        # Expose outputs
+        echo "scan_id=$(echo "$RESPONSE"             | jq -r '.scan_id')"              >> "$GITHUB_OUTPUT"
+        echo "vulnerabilities_stored=$(echo "$RESPONSE" | jq -r '.vulnerabilities_stored')" >> "$GITHUB_OUTPUT"
+        echo "critical=$(echo "$RESPONSE"            | jq -r '.critical // 0')"        >> "$GITHUB_OUTPUT"
+        echo "high=$(echo "$RESPONSE"               | jq -r '.high // 0')"             >> "$GITHUB_OUTPUT"
+
+        echo "::notice::TrivyHub — scan_id=$(echo $RESPONSE | jq -r '.scan_id'), vulnerabilities=$(echo $RESPONSE | jq -r '.vulnerabilities_stored')"

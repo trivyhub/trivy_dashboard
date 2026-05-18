@@ -176,12 +176,13 @@ func main() {
 	cmdConfig.MarkFlagRequired("key")
 
 	// ── push ──────────────────────────────────────────────────────────────────
-	var project, env, owner, file string
+	var project, env, owner, file, outputFmt string
 	cmdPush := &cobra.Command{
 		Use:   "push",
 		Short: "Envoyer un rapport Trivy",
 		Example: `  trivy image --format json mon-image:latest | trivy-push push --project mon-app
-  trivy-push push --project mon-app --file report.json`,
+  trivy-push push --project mon-app --file report.json
+  trivy-push push --project mon-app --file report.json --output json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -206,13 +207,17 @@ func main() {
 			}
 
 			ci := detectCI()
-			if ci.Provider != "" {
-				fmt.Printf("⚡ CI détecté: %s (pipeline %s)\n", ci.Provider, ci.PipelineID)
+			if outputFmt != "json" {
+				if ci.Provider != "" {
+					fmt.Printf("⚡ CI détecté: %s (pipeline %s)\n", ci.Provider, ci.PipelineID)
+				}
 			}
 
 			if env == "" {
 				env = detectEnv()
-				fmt.Printf("⚡ Environnement détecté: %s\n", env)
+				if outputFmt != "json" {
+					fmt.Printf("⚡ Environnement détecté: %s\n", env)
+				}
 			}
 
 			payload := PushPayload{
@@ -233,10 +238,14 @@ func main() {
 				return fmt.Errorf("erreur %d: %s", resp.StatusCode, string(respBody))
 			}
 
-			var result map[string]any
-			json.Unmarshal(respBody, &result)
-			fmt.Printf("✓ Rapport envoyé — projet: %s, scan_id: %v, CVE stockées: %v\n",
-				result["project"], result["scan_id"], result["vulnerabilities_stored"])
+			if outputFmt == "json" {
+				fmt.Print(string(respBody))
+			} else {
+				var result map[string]any
+				json.Unmarshal(respBody, &result)
+				fmt.Printf("✓ Rapport envoyé — projet: %s, scan_id: %v, CVE stockées: %v\n",
+					result["project"], result["scan_id"], result["vulnerabilities_stored"])
+			}
 			return nil
 		},
 	}
@@ -244,6 +253,7 @@ func main() {
 	cmdPush.Flags().StringVarP(&env, "env", "e", "", "Environnement (auto-détecté depuis la branche si vide)")
 	cmdPush.Flags().StringVarP(&owner, "owner", "o", "", "Équipe propriétaire")
 	cmdPush.Flags().StringVarP(&file, "file", "f", "", "Fichier JSON Trivy (sinon stdin)")
+	cmdPush.Flags().StringVar(&outputFmt, "output", "", "Format de sortie (json)")
 	cmdPush.MarkFlagRequired("project")
 
 	// ── status ────────────────────────────────────────────────────────────────

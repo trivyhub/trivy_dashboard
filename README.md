@@ -35,7 +35,7 @@ Next.js Frontend (separate repo)
 ### Run locally
 
 ```bash
-git clone https://github.com/theo-mrn/trivy_dashboard.git
+git clone https://github.com/trivyhub/trivy_dashboard.git
 cd trivy_dashboard
 docker compose up -d
 ```
@@ -58,19 +58,19 @@ Push Trivy reports to the dashboard from any pipeline.
 
 **Mac Apple Silicon**
 ```bash
-curl -L https://github.com/theo-mrn/trivy_dashboard/releases/latest/download/trivy-push-darwin-arm64 -o trivy-push
+curl -L https://github.com/trivyhub/trivy_dashboard/releases/latest/download/trivy-push-darwin-arm64 -o trivy-push
 chmod +x trivy-push && sudo mv trivy-push /usr/local/bin/
 ```
 
 **Mac Intel**
 ```bash
-curl -L https://github.com/theo-mrn/trivy_dashboard/releases/latest/download/trivy-push-darwin-amd64 -o trivy-push
+curl -L https://github.com/trivyhub/trivy_dashboard/releases/latest/download/trivy-push-darwin-amd64 -o trivy-push
 chmod +x trivy-push && sudo mv trivy-push /usr/local/bin/
 ```
 
 **Linux**
 ```bash
-curl -L https://github.com/theo-mrn/trivy_dashboard/releases/latest/download/trivy-push-linux-amd64 -o trivy-push
+curl -L https://github.com/trivyhub/trivy_dashboard/releases/latest/download/trivy-push-linux-amd64 -o trivy-push
 chmod +x trivy-push && sudo mv trivy-push /usr/local/bin/
 ```
 
@@ -117,7 +117,7 @@ Use the reusable action in any repo — 2 lines:
 
 ```yaml
 - name: Scan & push to TrivyHub
-  uses: theo-mrn/trivy_dashboard/.github/actions/trivy-push@main
+  uses: trivyhub/trivy-push-action@v1
   with:
     image: my-org/my-app:latest
     api-key: ${{ secrets.TRIVYHUB_API_KEY }}
@@ -136,7 +136,7 @@ Use the reusable action in any repo — 2 lines:
 ```yaml
 security-scan:
   script:
-    - curl -L https://github.com/theo-mrn/trivy_dashboard/releases/latest/download/trivy-push-linux-amd64 -o /usr/local/bin/trivy-push
+    - curl -L https://github.com/trivyhub/trivy_dashboard/releases/latest/download/trivy-push-linux-amd64 -o /usr/local/bin/trivy-push
     - chmod +x /usr/local/bin/trivy-push
     - trivy-push config --url $TRIVYHUB_URL --key $TRIVYHUB_API_KEY
     - trivy image --format json $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA | trivy-push push --project $CI_PROJECT_NAME
@@ -224,7 +224,7 @@ docker run -d --name trivy-dashboard --network trivy-net \
   -p 8080:8080 \
   -e DATABASE_URL="postgres://trivy:trivy@postgres:5432/trivy" \
   -e JWT_SECRET="your-secret" \
-  theo-mrn/trivy-dashboard:latest
+  trivyhub/trivy-dashboard:latest
 ```
 
 ---
