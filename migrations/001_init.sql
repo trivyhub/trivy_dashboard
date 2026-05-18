@@ -44,9 +44,9 @@ CREATE TABLE IF NOT EXISTS vulnerabilities (
     first_seen_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_users_organization_id        ON users(organization_id);
-CREATE INDEX idx_projects_organization_id     ON projects(organization_id);
-CREATE INDEX idx_scans_project_id             ON scans(project_id);
-CREATE INDEX idx_scans_scanned_at             ON scans(scanned_at DESC);
-CREATE INDEX idx_vulnerabilities_scan_id      ON vulnerabilities(scan_id);
-CREATE INDEX idx_vulnerabilities_severity     ON vulnerabilities(severity);
+CREATE INDEX IF NOT EXISTS idx_users_organization_id        ON users(organization_id);
+CREATE INDEX IF NOT EXISTS idx_projects_organization_id     ON projects(organization_id);
+CREATE INDEX IF NOT EXISTS idx_scans_project_id             ON scans(project_id);
+CREATE INDEX IF NOT EXISTS idx_scans_scanned_at             ON scans(scanned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vulnerabilities_scan_id      ON vulnerabilities(scan_id);
+CREATE INDEX IF NOT EXISTS idx_vulnerabilities_severity     ON vulnerabilities(severity);

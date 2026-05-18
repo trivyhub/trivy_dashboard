@@ -9,5 +9,5 @@ CREATE TABLE IF NOT EXISTS api_keys (
     revoked         BOOLEAN NOT NULL DEFAULT FALSE
 );
 
-CREATE INDEX idx_api_keys_organization_id ON api_keys(organization_id);
-CREATE INDEX idx_api_keys_key_hash        ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_organization_id ON api_keys(organization_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash        ON api_keys(key_hash);
