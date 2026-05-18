@@ -249,8 +249,9 @@ func (h *Handler) ListVulnerabilities(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 	severity := c.Query("severity")
+	projectName := c.Query("project")
 
-	vulns, total, err := h.repo.GetLatestVulnerabilitiesByOrg(c.Request.Context(), claims.OrganizationID, severity, limit, offset)
+	vulns, total, err := h.repo.GetLatestVulnerabilitiesByOrg(c.Request.Context(), claims.OrganizationID, severity, projectName, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list vulnerabilities"})
 		return

@@ -347,12 +347,16 @@ func (r *Repository) GetVulnerabilitiesByScan(ctx context.Context, scanID int) (
 	return vulns, rows.Err()
 }
 
-func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID int, severity string, limit, offset int) ([]models.DBVulnerability, int, error) {
-	severityFilter := ""
+func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID int, severity, projectName string, limit, offset int) ([]models.DBVulnerability, int, error) {
 	args := []any{orgID}
+	filters := ""
 	if severity != "" {
 		args = append(args, severity)
-		severityFilter = fmt.Sprintf("AND v.severity = $%d", len(args))
+		filters += fmt.Sprintf(" AND v.severity = $%d", len(args))
+	}
+	if projectName != "" {
+		args = append(args, projectName)
+		filters += fmt.Sprintf(" AND p.name = $%d", len(args))
 	}
 
 	// total
@@ -365,7 +369,7 @@ func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID in
 		WHERE p.organization_id = $1
 		  AND s.id = (SELECT id FROM scans WHERE project_id = p.id ORDER BY scanned_at DESC LIMIT 1)
 		%s
-	`, severityFilter)
+	`, filters)
 	r.db.QueryRow(ctx, countSQL, args...).Scan(&total)
 
 	// pagination args
@@ -384,7 +388,7 @@ func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID in
 			WHEN 'MEDIUM'   THEN 3 WHEN 'LOW'  THEN 4 ELSE 5
 		END, p.name, v.cve_id
 		LIMIT $%d OFFSET $%d
-	`, severityFilter, len(args)-1, len(args))
+	`, filters, len(args)-1, len(args))
 
 	rows, err := r.db.Query(ctx, dataSQL, args...)
 	if err != nil {
