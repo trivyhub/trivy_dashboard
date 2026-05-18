@@ -90,9 +90,14 @@ func configPath() string {
 
 func loadConfig() (Config, error) {
 	var cfg Config
+	if u := os.Getenv("TRIVYHUB_URL"); u != "" {
+		cfg.URL = u
+		cfg.APIKey = os.Getenv("TRIVYHUB_KEY")
+		return cfg, nil
+	}
 	data, err := os.ReadFile(configPath())
 	if err != nil {
-		return cfg, fmt.Errorf("config introuvable — lance d'abord: trivy-push config --url ... --key ...")
+		return cfg, fmt.Errorf("config introuvable — définis TRIVYHUB_URL et TRIVYHUB_KEY, ou lance: trivy-push config --url ... --key ...")
 	}
 	err = json.Unmarshal(data, &cfg)
 	return cfg, err
