@@ -70,15 +70,21 @@ type Result struct {
 	Vulnerabilities []Vulnerability `json:"Vulnerabilities,omitempty"`
 }
 
+type CVSSData struct {
+	V3Score float64 `json:"V3Score,omitempty"`
+	V2Score float64 `json:"V2Score,omitempty"`
+}
+
 type Vulnerability struct {
-	VulnerabilityID  string `json:"VulnerabilityID"`
-	PkgName          string `json:"PkgName"`
-	InstalledVersion string `json:"InstalledVersion"`
-	FixedVersion     string `json:"FixedVersion,omitempty"`
-	Title            string `json:"Title,omitempty"`
-	Description      string `json:"Description,omitempty"`
-	PrimaryURL       string `json:"PrimaryURL,omitempty"`
-	Severity         string `json:"Severity"`
+	VulnerabilityID  string              `json:"VulnerabilityID"`
+	PkgName          string              `json:"PkgName"`
+	InstalledVersion string              `json:"InstalledVersion"`
+	FixedVersion     string              `json:"FixedVersion,omitempty"`
+	Title            string              `json:"Title,omitempty"`
+	Description      string              `json:"Description,omitempty"`
+	PrimaryURL       string              `json:"PrimaryURL,omitempty"`
+	Severity         string              `json:"Severity"`
+	CVSS             map[string]CVSSData `json:"CVSS,omitempty"`
 }
 
 // ── Ingestion ─────────────────────────────────────────────────────────────────
@@ -111,6 +117,7 @@ type Scan struct {
 	ScannedAt   time.Time  `json:"scanned_at" db:"scanned_at"`
 	PipelineID  *string    `json:"pipeline_id" db:"pipeline_id"`
 	PipelineURL *string    `json:"pipeline_url" db:"pipeline_url"`
+	Langs       []string   `json:"langs" db:"langs"`
 }
 
 type ScanSummary struct {
@@ -123,18 +130,19 @@ type ScanSummary struct {
 }
 
 type DBVulnerability struct {
-	ID               int       `json:"id" db:"id"`
-	ScanID           int       `json:"scan_id" db:"scan_id"`
-	CVEID            string    `json:"cve_id" db:"cve_id"`
-	Severity         string    `json:"severity" db:"severity"`
-	PackageName      string    `json:"package_name" db:"package_name"`
-	InstalledVersion string    `json:"installed_version" db:"installed_version"`
-	FixedVersion     string    `json:"fixed_version" db:"fixed_version"`
-	Title            string    `json:"title" db:"title"`
-	Description      string    `json:"description" db:"description"`
-	PrimaryURL       string    `json:"primary_url" db:"primary_url"`
-	IsFixed          bool      `json:"is_fixed" db:"is_fixed"`
+	ID               int      `json:"id" db:"id"`
+	ScanID           int      `json:"scan_id" db:"scan_id"`
+	CVEID            string   `json:"cve_id" db:"cve_id"`
+	Severity         string   `json:"severity" db:"severity"`
+	PackageName      string   `json:"package_name" db:"package_name"`
+	InstalledVersion string   `json:"installed_version" db:"installed_version"`
+	FixedVersion     string   `json:"fixed_version" db:"fixed_version"`
+	Title            string   `json:"title" db:"title"`
+	Description      string   `json:"description" db:"description"`
+	PrimaryURL       string   `json:"primary_url" db:"primary_url"`
+	IsFixed          bool     `json:"is_fixed" db:"is_fixed"`
 	FirstSeenAt      time.Time `json:"first_seen_at" db:"first_seen_at"`
+	CVSSScore        *float64 `json:"cvss_score" db:"cvss_score"`
 }
 
 type ProjectSummary struct {

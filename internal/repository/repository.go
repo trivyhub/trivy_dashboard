@@ -217,7 +217,7 @@ func (r *Repository) ListProjects(ctx context.Context, orgID int) ([]models.Proj
 
 // ── Scans ─────────────────────────────────────────────────────────────────────
 
-func (r *Repository) CreateScan(ctx context.Context, projectID int, imageName, digest, pipelineID, pipelineURL string, raw json.RawMessage) (*models.Scan, error) {
+func (r *Repository) CreateScan(ctx context.Context, projectID int, imageName, digest, pipelineID, pipelineURL string, raw json.RawMessage, langs []string) (*models.Scan, error) {
 	s := &models.Scan{}
 	var pid, purl *string
 	if pipelineID != "" {
@@ -226,12 +226,15 @@ func (r *Repository) CreateScan(ctx context.Context, projectID int, imageName, d
 	if pipelineURL != "" {
 		purl = &pipelineURL
 	}
+	if langs == nil {
+		langs = []string{}
+	}
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO scans (project_id, image_name, image_digest, pipeline_id, pipeline_url, raw_json)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, project_id, image_name, image_digest, scanned_at, pipeline_id, pipeline_url
-	`, projectID, imageName, digest, pid, purl, raw).Scan(
-		&s.ID, &s.ProjectID, &s.ImageName, &s.ImageDigest, &s.ScannedAt, &s.PipelineID, &s.PipelineURL,
+		INSERT INTO scans (project_id, image_name, image_digest, pipeline_id, pipeline_url, raw_json, langs)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, project_id, image_name, image_digest, scanned_at, pipeline_id, pipeline_url, langs
+	`, projectID, imageName, digest, pid, purl, raw, langs).Scan(
+		&s.ID, &s.ProjectID, &s.ImageName, &s.ImageDigest, &s.ScannedAt, &s.PipelineID, &s.PipelineURL, &s.Langs,
 	)
 	return s, err
 }
@@ -240,7 +243,7 @@ func (r *Repository) ListScans(ctx context.Context, projectID int) ([]models.Sca
 	rows, err := r.db.Query(ctx, `
 		SELECT
 			s.id, s.project_id, s.image_name, s.image_digest, s.scanned_at,
-			s.pipeline_id, s.pipeline_url,
+			s.pipeline_id, s.pipeline_url, s.langs,
 			COUNT(CASE WHEN v.severity = 'CRITICAL' THEN 1 END) AS critical,
 			COUNT(CASE WHEN v.severity = 'HIGH'     THEN 1 END) AS high,
 			COUNT(CASE WHEN v.severity = 'MEDIUM'   THEN 1 END) AS medium,
@@ -262,7 +265,7 @@ func (r *Repository) ListScans(ctx context.Context, projectID int) ([]models.Sca
 		var ss models.ScanSummary
 		if err := rows.Scan(
 			&ss.ID, &ss.ProjectID, &ss.ImageName, &ss.ImageDigest, &ss.ScannedAt,
-			&ss.PipelineID, &ss.PipelineURL,
+			&ss.PipelineID, &ss.PipelineURL, &ss.Langs,
 			&ss.Critical, &ss.High, &ss.Medium, &ss.Low, &ss.Total,
 		); err != nil {
 			return nil, err
@@ -309,9 +312,9 @@ func (r *Repository) BulkInsertVulnerabilities(ctx context.Context, scanID int, 
 	for _, v := range vulns {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO vulnerabilities
-				(scan_id, cve_id, severity, package_name, installed_version, fixed_version, title, description, primary_url, is_fixed)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		`, scanID, v.CVEID, v.Severity, v.PackageName, v.InstalledVersion, v.FixedVersion, v.Title, v.Description, v.PrimaryURL, v.IsFixed)
+				(scan_id, cve_id, severity, package_name, installed_version, fixed_version, title, description, primary_url, is_fixed, cvss_score)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		`, scanID, v.CVEID, v.Severity, v.PackageName, v.InstalledVersion, v.FixedVersion, v.Title, v.Description, v.PrimaryURL, v.IsFixed, v.CVSSScore)
 		if err != nil {
 			return fmt.Errorf("insert vulnerability %s: %w", v.CVEID, err)
 		}
@@ -322,7 +325,7 @@ func (r *Repository) BulkInsertVulnerabilities(ctx context.Context, scanID int, 
 func (r *Repository) GetVulnerabilitiesByScan(ctx context.Context, scanID int) ([]models.DBVulnerability, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, scan_id, cve_id, severity, package_name,
-		       installed_version, fixed_version, title, description, primary_url, is_fixed, first_seen_at
+		       installed_version, fixed_version, title, description, primary_url, is_fixed, first_seen_at, cvss_score
 		FROM vulnerabilities WHERE scan_id = $1
 	`, scanID)
 	if err != nil {
@@ -335,7 +338,7 @@ func (r *Repository) GetVulnerabilitiesByScan(ctx context.Context, scanID int) (
 		var v models.DBVulnerability
 		if err := rows.Scan(
 			&v.ID, &v.ScanID, &v.CVEID, &v.Severity, &v.PackageName,
-			&v.InstalledVersion, &v.FixedVersion, &v.Title, &v.Description, &v.PrimaryURL, &v.IsFixed, &v.FirstSeenAt,
+			&v.InstalledVersion, &v.FixedVersion, &v.Title, &v.Description, &v.PrimaryURL, &v.IsFixed, &v.FirstSeenAt, &v.CVSSScore,
 		); err != nil {
 			return nil, err
 		}
@@ -369,7 +372,7 @@ func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID in
 	args = append(args, limit, offset)
 	dataSQL := fmt.Sprintf(`
 		SELECT v.id, v.scan_id, v.cve_id, v.severity, v.package_name,
-		       v.installed_version, v.fixed_version, v.title, v.description, v.primary_url, v.is_fixed, v.first_seen_at
+		       v.installed_version, v.fixed_version, v.title, v.description, v.primary_url, v.is_fixed, v.first_seen_at, v.cvss_score
 		FROM vulnerabilities v
 		JOIN scans s ON s.id = v.scan_id
 		JOIN projects p ON p.id = s.project_id
@@ -394,7 +397,7 @@ func (r *Repository) GetLatestVulnerabilitiesByOrg(ctx context.Context, orgID in
 		var v models.DBVulnerability
 		if err := rows.Scan(
 			&v.ID, &v.ScanID, &v.CVEID, &v.Severity, &v.PackageName,
-			&v.InstalledVersion, &v.FixedVersion, &v.Title, &v.Description, &v.PrimaryURL, &v.IsFixed, &v.FirstSeenAt,
+			&v.InstalledVersion, &v.FixedVersion, &v.Title, &v.Description, &v.PrimaryURL, &v.IsFixed, &v.FirstSeenAt, &v.CVSSScore,
 		); err != nil {
 			return nil, 0, err
 		}

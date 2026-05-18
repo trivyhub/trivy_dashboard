@@ -48,8 +48,40 @@ func (h *Handler) IngestReport(c *gin.Context) {
 		digest = req.Report.Metadata.RepoDigests[0]
 	}
 
+	// Detect languages/ecosystems from Result types
+	langSet := map[string]bool{}
+	trivyTypeToLang := map[string]string{
+		"gobinary": "Go", "gomodule": "Go",
+		"npm": "Node", "yarn": "Node", "pnpm": "Node",
+		"pip": "Python", "pipenv": "Python", "poetry": "Python",
+		"cargo": "Rust",
+		"jar": "Java", "gradle": "Java", "maven": "Java",
+		"gemspec": "Ruby", "bundler": "Ruby",
+		"nuget": "C#",
+		"composer": "PHP",
+		"swift": "Swift",
+		"terraform": "Terraform",
+		"cloudformation": "IaC",
+		"dockerfile": "Docker",
+		"ubuntu": "Docker", "debian": "Docker", "alpine": "Docker", "centos": "Docker", "redhat": "Docker",
+	}
+	for _, result := range req.Report.Results {
+		t := result.Type
+		if lang, ok := trivyTypeToLang[t]; ok {
+			langSet[lang] = true
+		}
+	}
+	// Always add Docker if scanning a container image
+	if req.Report.ArtifactType == "container_image" {
+		langSet["Docker"] = true
+	}
+	langs := make([]string, 0, len(langSet))
+	for l := range langSet {
+		langs = append(langs, l)
+	}
+
 	rawJSON, _ := json.Marshal(req.Report)
-	scan, err := h.repo.CreateScan(ctx, project.ID, req.Report.ArtifactName, digest, req.PipelineID, req.PipelineURL, rawJSON)
+	scan, err := h.repo.CreateScan(ctx, project.ID, req.Report.ArtifactName, digest, req.PipelineID, req.PipelineURL, rawJSON, langs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create scan"})
 		return
@@ -58,6 +90,26 @@ func (h *Handler) IngestReport(c *gin.Context) {
 	var vulns []models.DBVulnerability
 	for _, result := range req.Report.Results {
 		for _, v := range result.Vulnerabilities {
+			var cvssScore *float64
+			if len(v.CVSS) > 0 {
+				// Priority: nvd > redhat > first available
+				for _, source := range []string{"nvd", "redhat"} {
+					if d, ok := v.CVSS[source]; ok && d.V3Score > 0 {
+						score := d.V3Score
+						cvssScore = &score
+						break
+					}
+				}
+				if cvssScore == nil {
+					for _, d := range v.CVSS {
+						if d.V3Score > 0 {
+							score := d.V3Score
+							cvssScore = &score
+							break
+						}
+					}
+				}
+			}
 			vulns = append(vulns, models.DBVulnerability{
 				ScanID:           scan.ID,
 				CVEID:            v.VulnerabilityID,
@@ -69,6 +121,7 @@ func (h *Handler) IngestReport(c *gin.Context) {
 				Description:      v.Description,
 				PrimaryURL:       v.PrimaryURL,
 				IsFixed:          false,
+				CVSSScore:        cvssScore,
 			})
 		}
 	}
